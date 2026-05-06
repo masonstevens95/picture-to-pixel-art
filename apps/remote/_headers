@@ -1,0 +1,20 @@
+# Cloudflare Pages / Netlify _headers format.
+#
+# Required: cross-origin reads on remoteEntry.js and the asset chunks the
+# federated host fetches at runtime. Without these, the host gets a CORS
+# block when it tries to lazy-load PixelArtApp.
+
+/remoteEntry.js
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=300, must-revalidate
+
+/mf-entry-bootstrap-*.js
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=300, must-revalidate
+
+/assets/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable
+
+/@mf-types*
+  Access-Control-Allow-Origin: *
