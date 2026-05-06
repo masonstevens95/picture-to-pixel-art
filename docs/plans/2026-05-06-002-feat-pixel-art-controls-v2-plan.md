@@ -1,7 +1,7 @@
 ---
 title: "feat: Pixel-Art Controls v2 (aspect ratio, palette, brand colors, saturation)"
 type: feat
-status: active
+status: completed
 date: 2026-05-06
 origin: docs/brainstorms/2026-05-06-pixel-art-microfrontend-requirements.md
 ---
