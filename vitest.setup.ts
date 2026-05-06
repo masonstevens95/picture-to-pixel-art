@@ -50,7 +50,7 @@ if (typeof (globalThis as unknown as { ImageData?: unknown }).ImageData === "und
     public readonly data: Uint8ClampedArray;
     public readonly width: number;
     public readonly height: number;
-    public readonly colorSpace: "srgb" = "srgb";
+    public readonly colorSpace = "srgb" as const;
 
     constructor(
       dataOrWidth: Uint8ClampedArray | number,
