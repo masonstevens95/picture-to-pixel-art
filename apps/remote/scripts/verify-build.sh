@@ -17,7 +17,19 @@ set -euo pipefail
 REMOTE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$REMOTE_ROOT/dist"
 ASSETS="$DIST/assets"
-MAX_EXPOSED_CHUNK_BYTES=50000
+# Hard ceiling per v2 plan R7 + scope-guardian doc-review.
+#
+# Sizing rationale (raw, not gzipped):
+#   v1 final exposed chunk: 8886 bytes (~3 KB gzipped)
+#   v2 final exposed chunk: 20810 bytes (~6.6 KB gzipped)
+#   v1 → v2 delta gzipped: ~3.6 KB — under R7's +5 KB gzipped target.
+#   Ceiling set at v2-measured + 2 KB headroom = 23000 bytes raw.
+#
+# Builds that exceed this fail loudly so the budget stays enforced, not
+# aspirational. If a future change pushes past 23 KB, that's the signal
+# to revisit (likely the curated palette catalog or an additional
+# component would need to be re-evaluated).
+MAX_EXPOSED_CHUNK_BYTES=23000
 
 fail() {
   echo "VERIFY FAIL: $*" >&2

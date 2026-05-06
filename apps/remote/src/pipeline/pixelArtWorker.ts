@@ -5,8 +5,10 @@ import type {
   WorkerErrorMessage,
   WorkerInboundMessage,
 } from "./protocol";
+import { centerCrop } from "./crop";
 import { areaAverageDownscale } from "./downscale";
 import { quantizePalette } from "./quantize";
+import { saturationAdjust } from "./saturation";
 
 /**
  * Worker entrypoint.
@@ -58,8 +60,6 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
     return;
   }
 
-  const { width, height } = computeTargetDims(srcW, srcH, targetLongEdge);
-
   // Step 1: rasterize the source bitmap onto a same-size canvas with a
   // neutral background underneath. This collapses any alpha into solid RGB.
   const sourceCanvas = new OffscreenCanvas(srcW, srcH);
@@ -76,11 +76,29 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
 
   const sourceImageData = sourceCtx.getImageData(0, 0, srcW, srcH);
 
-  // Step 2: area-average downscale (pure JS, no canvas resize).
-  const downscaled = areaAverageDownscale(sourceImageData, width, height);
+  // Step 2: optional saturation adjustment (HSL). amount=0 short-circuits
+  // inside saturationAdjust to return the input ImageData unchanged, so
+  // v1 defaults produce v1-bit-identical output.
+  const adjusted = saturationAdjust(sourceImageData, msg.saturation ?? 0);
 
-  // Step 3: Wu quantization to a 16-color palette.
-  const quantized = quantizePalette(downscaled, DEFAULT_PALETTE_SIZE);
+  // Step 3: optional aspect-ratio center crop. Undefined ratio preserves
+  // source dims (v1 default).
+  const cropped =
+    msg.aspectRatio !== undefined ? centerCrop(adjusted, msg.aspectRatio) : adjusted;
+
+  // Now compute target dimensions from the (possibly cropped) image.
+  const { width, height } = computeTargetDims(cropped.width, cropped.height, targetLongEdge);
+
+  // Step 4: area-average downscale (pure JS, no canvas resize).
+  const downscaled = areaAverageDownscale(cropped, width, height);
+
+  // Step 5: quantize. Auto mode (no fixedPalette, no brandColors) is the
+  // v1 path. Fixed-palette + brand-colors variations layer in via options.
+  const quantized = quantizePalette(downscaled, {
+    paletteSize: DEFAULT_PALETTE_SIZE,
+    fixedPalette: msg.fixedPalette,
+    brandColors: msg.brandColors,
+  });
 
   const result: ProcessResult = {
     type: "result",
