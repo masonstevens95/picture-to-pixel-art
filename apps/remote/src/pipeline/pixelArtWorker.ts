@@ -92,8 +92,13 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
   // Step 4: area-average downscale (pure JS, no canvas resize).
   const downscaled = areaAverageDownscale(cropped, width, height);
 
-  // Step 5: Wu quantization to a 16-color palette.
-  const quantized = quantizePalette(downscaled, DEFAULT_PALETTE_SIZE);
+  // Step 5: quantize. Auto mode (no fixedPalette, no brandColors) is the
+  // v1 path. Fixed-palette + brand-colors variations layer in via options.
+  const quantized = quantizePalette(downscaled, {
+    paletteSize: DEFAULT_PALETTE_SIZE,
+    fixedPalette: msg.fixedPalette,
+    brandColors: msg.brandColors,
+  });
 
   const result: ProcessResult = {
     type: "result",

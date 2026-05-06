@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
 import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRatioSelect";
 import DropZone from "../components/DropZone";
+import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
 import { usePixelArtPipeline } from "../hooks/usePixelArtPipeline";
 import { downloadResultAsPng } from "../pipeline/exportPng";
+import { CURATED_PALETTES, type CuratedPaletteId, type RGB } from "../pipeline/palettes";
 import type { ValidLongEdge } from "../pipeline/protocol";
 
 /**
@@ -30,6 +32,10 @@ export default function PixelArtApp() {
   const [resolution, setResolution] = useState<ValidLongEdge>(DEFAULT_RESOLUTION);
   const [saturation, setSaturation] = useState<number>(DEFAULT_SATURATION);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioValue>(undefined);
+  const [paletteMode, setPaletteMode] = useState<PaletteMode>("auto");
+  const [curatedPaletteId, setCuratedPaletteId] = useState<CuratedPaletteId>("pico-8");
+  const [customPaletteText, setCustomPaletteText] = useState<string>("");
+  const [customPaletteColors, setCustomPaletteColors] = useState<readonly RGB[] | null>(null);
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -70,7 +76,13 @@ export default function PixelArtApp() {
         // before sending to keep our retained reference valid for the next
         // resolution change.
         const transferable = await createImageBitmap(bitmap);
-        process(transferable, resolution, { saturation, aspectRatio });
+        const fixedPalette =
+          paletteMode === "curated"
+            ? CURATED_PALETTES[curatedPaletteId].colors
+            : paletteMode === "custom"
+              ? (customPaletteColors ?? undefined)
+              : undefined;
+        process(transferable, resolution, { saturation, aspectRatio, fixedPalette });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
         // separate path. Surface them via a synthetic error state.
@@ -83,7 +95,16 @@ export default function PixelArtApp() {
     return () => {
       cancelled = true;
     };
-  }, [sourceFile, resolution, saturation, aspectRatio, process]);
+  }, [
+    sourceFile,
+    resolution,
+    saturation,
+    aspectRatio,
+    paletteMode,
+    curatedPaletteId,
+    customPaletteColors,
+    process,
+  ]);
 
   // Cleanup retained source bitmap on unmount.
   useEffect(() => {
@@ -146,6 +167,16 @@ export default function PixelArtApp() {
       <AdvancedControlsPanel>
         <SaturationSlider value={saturation} onChange={setSaturation} disabled={!hasImage} />
         <AspectRatioSelect value={aspectRatio} onChange={setAspectRatio} disabled={!hasImage} />
+        <PaletteModeControl
+          mode={paletteMode}
+          onModeChange={setPaletteMode}
+          curatedPaletteId={curatedPaletteId}
+          onCuratedPaletteIdChange={setCuratedPaletteId}
+          customPaletteText={customPaletteText}
+          onCustomPaletteTextChange={setCustomPaletteText}
+          onCustomPaletteParsed={setCustomPaletteColors}
+          disabled={!hasImage}
+        />
       </AdvancedControlsPanel>
 
       <SideBySidePreview

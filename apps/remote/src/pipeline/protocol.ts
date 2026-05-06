@@ -23,6 +23,18 @@ export interface ProcessRequest {
   readonly saturation?: number; // -1..+1, default 0 (no transform)
   /** Width/height ratio. Undefined preserves source aspect (v1 default). */
   readonly aspectRatio?: number;
+  /**
+   * When supplied, the worker uses this palette directly instead of running
+   * Wu over the source. Used by Curated and Custom palette modes. Undefined
+   * is the v1 Auto path.
+   */
+  readonly fixedPalette?: readonly (readonly [number, number, number])[];
+  /**
+   * Optional brand-color anchors. Combine with fixedPalette or with the
+   * Auto path; brand colors always take the first N slots of the resulting
+   * palette.
+   */
+  readonly brandColors?: readonly (readonly [number, number, number])[];
 }
 
 export interface ProcessResult {

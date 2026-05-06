@@ -43,6 +43,10 @@ export interface ProcessOptions {
   saturation?: number;
   /** Width/height. Undefined preserves source aspect (v1 default). */
   aspectRatio?: number;
+  /** Curated or custom palette. Undefined uses Auto (Wu over source). */
+  fixedPalette?: readonly (readonly [number, number, number])[];
+  /** Additive brand-color anchors. */
+  brandColors?: readonly (readonly [number, number, number])[];
 }
 
 export interface UsePixelArtPipelineApi {
@@ -145,6 +149,8 @@ export function usePixelArtPipeline(
           targetLongEdge: queued.targetLongEdge,
           saturation: queued.options.saturation,
           aspectRatio: queued.options.aspectRatio,
+          fixedPalette: queued.options.fixedPalette,
+          brandColors: queued.options.brandColors,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));
