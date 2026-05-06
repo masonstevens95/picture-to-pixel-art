@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
 import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRatioSelect";
+import BrandColorsTextarea from "../components/BrandColorsTextarea";
 import DropZone from "../components/DropZone";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
 import ResolutionSlider from "../components/ResolutionSlider";
@@ -36,6 +37,8 @@ export default function PixelArtApp() {
   const [curatedPaletteId, setCuratedPaletteId] = useState<CuratedPaletteId>("pico-8");
   const [customPaletteText, setCustomPaletteText] = useState<string>("");
   const [customPaletteColors, setCustomPaletteColors] = useState<readonly RGB[] | null>(null);
+  const [brandColorsText, setBrandColorsText] = useState<string>("");
+  const [brandColors, setBrandColors] = useState<readonly RGB[] | null>(null);
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -82,7 +85,12 @@ export default function PixelArtApp() {
             : paletteMode === "custom"
               ? (customPaletteColors ?? undefined)
               : undefined;
-        process(transferable, resolution, { saturation, aspectRatio, fixedPalette });
+        process(transferable, resolution, {
+          saturation,
+          aspectRatio,
+          fixedPalette,
+          brandColors: brandColors ?? undefined,
+        });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
         // separate path. Surface them via a synthetic error state.
@@ -103,6 +111,7 @@ export default function PixelArtApp() {
     paletteMode,
     curatedPaletteId,
     customPaletteColors,
+    brandColors,
     process,
   ]);
 
@@ -175,6 +184,13 @@ export default function PixelArtApp() {
           customPaletteText={customPaletteText}
           onCustomPaletteTextChange={setCustomPaletteText}
           onCustomPaletteParsed={setCustomPaletteColors}
+          disabled={!hasImage}
+        />
+        <BrandColorsTextarea
+          text={brandColorsText}
+          onTextChange={setBrandColorsText}
+          onParsed={setBrandColors}
+          paletteOverridden={paletteMode !== "auto"}
           disabled={!hasImage}
         />
       </AdvancedControlsPanel>
