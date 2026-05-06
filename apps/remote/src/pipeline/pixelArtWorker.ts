@@ -47,11 +47,22 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
     return;
   }
 
-  const { width, height } = computeTargetDims(bitmap.width, bitmap.height, targetLongEdge);
+  // Capture dims BEFORE closing the bitmap — close() zeroes width/height,
+  // and we still need the source dims for getImageData below.
+  const srcW = bitmap.width;
+  const srcH = bitmap.height;
+
+  if (srcW <= 0 || srcH <= 0) {
+    postError(jobId, "invalid_input", `Source bitmap has zero dimension: ${srcW}x${srcH}`);
+    bitmap.close();
+    return;
+  }
+
+  const { width, height } = computeTargetDims(srcW, srcH, targetLongEdge);
 
   // Step 1: rasterize the source bitmap onto a same-size canvas with a
   // neutral background underneath. This collapses any alpha into solid RGB.
-  const sourceCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const sourceCanvas = new OffscreenCanvas(srcW, srcH);
   const sourceCtx = sourceCanvas.getContext("2d", { colorSpace: "srgb" });
   if (!sourceCtx) {
     postError(jobId, "internal_error", "Could not acquire source 2D context");
@@ -59,11 +70,11 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
     return;
   }
   sourceCtx.fillStyle = NEUTRAL_BACKGROUND;
-  sourceCtx.fillRect(0, 0, bitmap.width, bitmap.height);
+  sourceCtx.fillRect(0, 0, srcW, srcH);
   sourceCtx.drawImage(bitmap, 0, 0);
   bitmap.close();
 
-  const sourceImageData = sourceCtx.getImageData(0, 0, bitmap.width, bitmap.height);
+  const sourceImageData = sourceCtx.getImageData(0, 0, srcW, srcH);
 
   // Step 2: area-average downscale (pure JS, no canvas resize).
   const downscaled = areaAverageDownscale(sourceImageData, width, height);
