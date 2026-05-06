@@ -1,1 +1,8 @@
+node_modules/
+dist/
+.vite/
+.cache/
+*.log
+.DS_Store
+
 .compound-engineering/*.local.yaml

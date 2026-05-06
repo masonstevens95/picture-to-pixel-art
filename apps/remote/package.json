@@ -1,0 +1,24 @@
+{
+  "name": "@pixelart/remote",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && ./scripts/verify-build.sh",
+    "build:noverify": "vite build",
+    "dev": "concurrently -k -n build,serve -c blue,green \"vite build --watch\" \"vite preview --port 5174 --strictPort\"",
+    "preview": "vite preview --port 5174 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "verify": "./scripts/verify-build.sh"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@module-federation/vite": "^1.4.0",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1"
+  }
+}
