@@ -5,16 +5,29 @@ import type {
   WorkerErrorMessage,
   WorkerInboundMessage,
 } from "./protocol";
+import { areaAverageDownscale } from "./downscale";
+import { quantizePalette } from "./quantize";
 
 /**
- * Worker entrypoint. U3 ships an identity transform — render the source
- * ImageBitmap to an OffscreenCanvas at the target long-edge size and
- * return the resulting pixels via a transferable buffer. U4 replaces the
- * single OffscreenCanvas draw with area-average downscale + image-q Wu
- * quantization; the protocol contract here stays stable across that swap.
+ * Worker entrypoint.
+ *
+ * Pipeline per `process` message:
+ *   bitmap -> composite-onto-neutral -> ImageData (opaque)
+ *          -> areaAverageDownscale(target dims)
+ *          -> quantizePalette(16 colors, Wu)
+ *          -> postMessage with transferred buffer
+ *
+ * Alpha is normalized once at the composite step — the source ImageBitmap
+ * may have transparency (PNGs, decoded SVGs), but everything downstream of
+ * the composite assumes fully opaque pixels. Origin spec is fully opaque
+ * v1 output; this is the single point in the pipeline where that invariant
+ * is enforced.
  */
 
 declare const self: DedicatedWorkerGlobalScope;
+
+const NEUTRAL_BACKGROUND = "#171717"; // Tailwind neutral-900, matches host chrome.
+const DEFAULT_PALETTE_SIZE = 16;
 
 self.addEventListener("message", (event: MessageEvent<WorkerInboundMessage>) => {
   const msg = event.data;
@@ -36,33 +49,36 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
 
   const { width, height } = computeTargetDims(bitmap.width, bitmap.height, targetLongEdge);
 
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true, colorSpace: "srgb" });
-  if (!ctx) {
-    postError(jobId, "internal_error", "Could not acquire OffscreenCanvas 2D context");
+  // Step 1: rasterize the source bitmap onto a same-size canvas with a
+  // neutral background underneath. This collapses any alpha into solid RGB.
+  const sourceCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const sourceCtx = sourceCanvas.getContext("2d", { colorSpace: "srgb" });
+  if (!sourceCtx) {
+    postError(jobId, "internal_error", "Could not acquire source 2D context");
     bitmap.close();
     return;
   }
-
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(bitmap, 0, 0, width, height);
-
-  const imageData = ctx.getImageData(0, 0, width, height);
-
-  // Always close the input ImageBitmap — main thread no longer owns it after
-  // the structured-clone transfer, so leaks accumulate across slider drags
-  // unless the worker disposes here.
+  sourceCtx.fillStyle = NEUTRAL_BACKGROUND;
+  sourceCtx.fillRect(0, 0, bitmap.width, bitmap.height);
+  sourceCtx.drawImage(bitmap, 0, 0);
   bitmap.close();
+
+  const sourceImageData = sourceCtx.getImageData(0, 0, bitmap.width, bitmap.height);
+
+  // Step 2: area-average downscale (pure JS, no canvas resize).
+  const downscaled = areaAverageDownscale(sourceImageData, width, height);
+
+  // Step 3: Wu quantization to a 16-color palette.
+  const quantized = quantizePalette(downscaled, DEFAULT_PALETTE_SIZE);
 
   const result: ProcessResult = {
     type: "result",
     jobId,
-    width,
-    height,
-    pixels: imageData.data,
+    width: quantized.width,
+    height: quantized.height,
+    pixels: quantized.data,
   };
-  self.postMessage(result, [imageData.data.buffer]);
+  self.postMessage(result, [quantized.data.buffer]);
 }
 
 export function computeTargetDims(
@@ -75,7 +91,6 @@ export function computeTargetDims(
   }
   const longEdge = Math.max(sourceWidth, sourceHeight);
   if (targetLongEdge >= longEdge) {
-    // Don't upscale — return source dimensions when target meets or exceeds source.
     return { width: sourceWidth, height: sourceHeight };
   }
   const scale = targetLongEdge / longEdge;
