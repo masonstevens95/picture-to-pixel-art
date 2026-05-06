@@ -1,0 +1,251 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderHook, act, cleanup } from "@testing-library/react";
+import { usePixelArtPipeline } from "../../src/hooks/usePixelArtPipeline";
+import type { ProcessResult, WorkerErrorMessage } from "../../src/pipeline/protocol";
+
+/**
+ * Hook tests use a hand-rolled MockWorker. The real worker pipeline (with
+ * OffscreenCanvas + ImageBitmap) is exercised in browser-mode tests once
+ * U3's `*.browser.test.ts` lands; here we focus on the hook's contract:
+ * debounce, jobId monotonicity, stale-result discard, and unmount cleanup.
+ */
+
+interface QueuedMessage {
+  jobId: number;
+  bitmap: ImageBitmap;
+  targetLongEdge: number;
+}
+
+class MockWorker {
+  public terminated = false;
+  public sent: QueuedMessage[] = [];
+  public closedBitmaps: ImageBitmap[] = [];
+
+  private listeners: ((event: MessageEvent<unknown>) => void)[] = [];
+
+  addEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+    this.listeners.push(listener);
+  }
+
+  removeEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+    this.listeners = this.listeners.filter((l) => l !== listener);
+  }
+
+  postMessage(message: { type: string; jobId: number; bitmap: ImageBitmap; targetLongEdge: number }): void {
+    if (message.type !== "process") return;
+    this.sent.push({
+      jobId: message.jobId,
+      bitmap: message.bitmap,
+      targetLongEdge: message.targetLongEdge,
+    });
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+
+  emitResult(jobId: number, width = 4, height = 3): void {
+    const result: ProcessResult = {
+      type: "result",
+      jobId,
+      width,
+      height,
+      pixels: new Uint8ClampedArray(width * height * 4),
+    };
+    this.dispatch(result);
+  }
+
+  emitError(jobId: number): void {
+    const err: WorkerErrorMessage = {
+      type: "error",
+      jobId,
+      code: "decode_failed",
+      message: "boom",
+    };
+    this.dispatch(err);
+  }
+
+  private dispatch(data: unknown): void {
+    const event = { data } as MessageEvent<unknown>;
+    for (const l of this.listeners) l(event);
+  }
+}
+
+function fakeBitmap(): ImageBitmap {
+  let closed = false;
+  return {
+    width: 100,
+    height: 80,
+    close() {
+      closed = true;
+    },
+    get __closed() {
+      return closed;
+    },
+  } as unknown as ImageBitmap;
+}
+
+describe("usePixelArtPipeline", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("dispatches a single process message after debounce and resolves on result", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    const bmp = fakeBitmap();
+    act(() => {
+      result.current.process(bmp, 64);
+    });
+    // Before debounce fires, nothing is sent.
+    expect(worker.sent.length).toBe(0);
+    expect(result.current.state.status).toBe("idle");
+
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+    expect(worker.sent.length).toBe(1);
+    expect(worker.sent[0]?.jobId).toBe(1);
+    expect(result.current.state.status).toBe("processing");
+
+    act(() => {
+      worker.emitResult(1, 64, 51);
+    });
+    expect(result.current.state.status).toBe("ready");
+    expect(result.current.state.result?.width).toBe(64);
+    expect(result.current.state.result?.height).toBe(51);
+  });
+
+  it("debounce collapses rapid calls to a single dispatch with monotonic jobId", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    act(() => {
+      for (let i = 0; i < 10; i++) {
+        result.current.process(fakeBitmap(), 32);
+      }
+      vi.advanceTimersByTime(16);
+    });
+
+    expect(worker.sent.length).toBe(1);
+    expect(worker.sent[0]?.jobId).toBe(1);
+  });
+
+  it("ignores results whose jobId is older than the latest dispatched", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    // Two distinct dispatches separated by debounce flushes.
+    act(() => {
+      result.current.process(fakeBitmap(), 32);
+      vi.advanceTimersByTime(16);
+    });
+    act(() => {
+      result.current.process(fakeBitmap(), 128);
+      vi.advanceTimersByTime(16);
+    });
+    expect(worker.sent.length).toBe(2);
+    expect(worker.sent.map((m) => m.jobId)).toEqual([1, 2]);
+
+    // Stale jobId 1 result arrives — must be discarded.
+    act(() => {
+      worker.emitResult(1, 32, 25);
+    });
+    expect(result.current.state.status).toBe("processing");
+    expect(result.current.state.result).toBeNull();
+
+    // Then the live jobId 2 result arrives.
+    act(() => {
+      worker.emitResult(2, 128, 102);
+    });
+    expect(result.current.state.status).toBe("ready");
+    expect(result.current.state.result?.width).toBe(128);
+  });
+
+  it("rejects invalid targetLongEdge at the boundary and closes the bitmap", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    const bmp = fakeBitmap();
+    act(() => {
+      result.current.process(bmp, 0);
+      vi.advanceTimersByTime(16);
+    });
+    expect(worker.sent.length).toBe(0);
+    expect((bmp as unknown as { __closed: boolean }).__closed).toBe(true);
+    expect(result.current.state.status).toBe("idle");
+  });
+
+  it("surfaces worker errors for the latest jobId only", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    act(() => {
+      result.current.process(fakeBitmap(), 64);
+      vi.advanceTimersByTime(16);
+      worker.emitError(1);
+    });
+    expect(result.current.state.status).toBe("error");
+    expect(result.current.state.error?.code).toBe("decode_failed");
+  });
+
+  it("terminates the worker and closes any queued bitmap on unmount", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { unmount, result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    const bmp = fakeBitmap();
+    act(() => {
+      // Queue a dispatch but don't advance past the debounce — bitmap is
+      // still owned by the main thread, must be closed on unmount.
+      result.current.process(bmp, 64);
+    });
+    expect(worker.terminated).toBe(false);
+    unmount();
+    expect(worker.terminated).toBe(true);
+    expect((bmp as unknown as { __closed: boolean }).__closed).toBe(true);
+  });
+
+  it("dropping a queued bitmap (replaced before debounce flush) closes the old one", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    const first = fakeBitmap();
+    const second = fakeBitmap();
+    act(() => {
+      result.current.process(first, 32);
+      // Before debounce flushes, dispatch again — first bitmap is now stranded
+      // unless the hook closes it. Verify it does.
+      result.current.process(second, 64);
+    });
+    expect((first as unknown as { __closed: boolean }).__closed).toBe(true);
+    expect((second as unknown as { __closed: boolean }).__closed).toBe(false);
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+    expect(worker.sent.length).toBe(1);
+    expect(worker.sent[0]?.targetLongEdge).toBe(64);
+  });
+});
