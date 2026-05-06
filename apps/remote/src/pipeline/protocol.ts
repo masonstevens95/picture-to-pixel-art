@@ -21,6 +21,8 @@ export interface ProcessRequest {
    * the protocol stays forward-compatible.
    */
   readonly saturation?: number; // -1..+1, default 0 (no transform)
+  /** Width/height ratio. Undefined preserves source aspect (v1 default). */
+  readonly aspectRatio?: number;
 }
 
 export interface ProcessResult {

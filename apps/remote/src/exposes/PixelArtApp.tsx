@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
+import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRatioSelect";
 import DropZone from "../components/DropZone";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
@@ -28,6 +29,7 @@ export default function PixelArtApp() {
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [resolution, setResolution] = useState<ValidLongEdge>(DEFAULT_RESOLUTION);
   const [saturation, setSaturation] = useState<number>(DEFAULT_SATURATION);
+  const [aspectRatio, setAspectRatio] = useState<AspectRatioValue>(undefined);
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -68,7 +70,7 @@ export default function PixelArtApp() {
         // before sending to keep our retained reference valid for the next
         // resolution change.
         const transferable = await createImageBitmap(bitmap);
-        process(transferable, resolution, { saturation });
+        process(transferable, resolution, { saturation, aspectRatio });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
         // separate path. Surface them via a synthetic error state.
@@ -81,7 +83,7 @@ export default function PixelArtApp() {
     return () => {
       cancelled = true;
     };
-  }, [sourceFile, resolution, saturation, process]);
+  }, [sourceFile, resolution, saturation, aspectRatio, process]);
 
   // Cleanup retained source bitmap on unmount.
   useEffect(() => {
@@ -143,6 +145,7 @@ export default function PixelArtApp() {
       */}
       <AdvancedControlsPanel>
         <SaturationSlider value={saturation} onChange={setSaturation} disabled={!hasImage} />
+        <AspectRatioSelect value={aspectRatio} onChange={setAspectRatio} disabled={!hasImage} />
       </AdvancedControlsPanel>
 
       <SideBySidePreview

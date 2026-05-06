@@ -41,6 +41,8 @@ export interface UsePixelArtPipelineOptions {
 export interface ProcessOptions {
   /** -1..+1, default 0. Forwarded as ProcessRequest.saturation. */
   saturation?: number;
+  /** Width/height. Undefined preserves source aspect (v1 default). */
+  aspectRatio?: number;
 }
 
 export interface UsePixelArtPipelineApi {
@@ -142,6 +144,7 @@ export function usePixelArtPipeline(
           bitmap: queued.bitmap,
           targetLongEdge: queued.targetLongEdge,
           saturation: queued.options.saturation,
+          aspectRatio: queued.options.aspectRatio,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));
