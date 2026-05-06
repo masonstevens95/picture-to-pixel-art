@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
+    "paths": {
+      "@pixelart/remote/exposes/*": ["../remote/src/exposes/*"]
+    }
+  },
+  "include": ["src/**/*", "tests/**/*"]
+}
