@@ -38,9 +38,14 @@ export interface UsePixelArtPipelineOptions {
   workerFactory?: () => Worker;
 }
 
+export interface ProcessOptions {
+  /** -1..+1, default 0. Forwarded as ProcessRequest.saturation. */
+  saturation?: number;
+}
+
 export interface UsePixelArtPipelineApi {
   state: PipelineState;
-  process: (bitmap: ImageBitmap, targetLongEdge: number) => void;
+  process: (bitmap: ImageBitmap, targetLongEdge: number, options?: ProcessOptions) => void;
 }
 
 const defaultWorkerFactory = (): Worker =>
@@ -60,7 +65,9 @@ export function usePixelArtPipeline(
   const workerRef = useRef<Worker | null>(null);
   const latestJobIdRef = useRef(0);
   const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingDispatchRef = useRef<{ bitmap: ImageBitmap; targetLongEdge: number } | null>(null);
+  const pendingDispatchRef = useRef<
+    { bitmap: ImageBitmap; targetLongEdge: number; options: ProcessOptions } | null
+  >(null);
 
   useEffect(() => {
     const worker = workerFactory();
@@ -99,7 +106,7 @@ export function usePixelArtPipeline(
   }, [workerFactory]);
 
   const process = useCallback(
-    (bitmap: ImageBitmap, targetLongEdge: number) => {
+    (bitmap: ImageBitmap, targetLongEdge: number, options: ProcessOptions = {}) => {
       if (!Number.isFinite(targetLongEdge) || targetLongEdge <= 0) {
         // Reject at the boundary — don't dispatch garbage to the worker.
         bitmap.close();
@@ -111,7 +118,7 @@ export function usePixelArtPipeline(
       if (pendingDispatchRef.current) {
         pendingDispatchRef.current.bitmap.close();
       }
-      pendingDispatchRef.current = { bitmap, targetLongEdge };
+      pendingDispatchRef.current = { bitmap, targetLongEdge, options };
 
       if (pendingTimerRef.current !== null) {
         clearTimeout(pendingTimerRef.current);
@@ -134,6 +141,7 @@ export function usePixelArtPipeline(
           jobId,
           bitmap: queued.bitmap,
           targetLongEdge: queued.targetLongEdge,
+          saturation: queued.options.saturation,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

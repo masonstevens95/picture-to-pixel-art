@@ -15,6 +15,12 @@ export interface ProcessRequest {
   readonly jobId: number;
   readonly bitmap: ImageBitmap;
   readonly targetLongEdge: number;
+  /**
+   * v2 optional fields. All have v1-equivalent defaults: absence reproduces
+   * v1 behavior exactly. The worker must read each as `?? <v1-default>` so
+   * the protocol stays forward-compatible.
+   */
+  readonly saturation?: number; // -1..+1, default 0 (no transform)
 }
 
 export interface ProcessResult {

@@ -7,6 +7,7 @@ import type {
 } from "./protocol";
 import { areaAverageDownscale } from "./downscale";
 import { quantizePalette } from "./quantize";
+import { saturationAdjust } from "./saturation";
 
 /**
  * Worker entrypoint.
@@ -76,10 +77,15 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
 
   const sourceImageData = sourceCtx.getImageData(0, 0, srcW, srcH);
 
-  // Step 2: area-average downscale (pure JS, no canvas resize).
-  const downscaled = areaAverageDownscale(sourceImageData, width, height);
+  // Step 2: optional saturation adjustment (HSL). amount=0 short-circuits
+  // inside saturationAdjust to return the input ImageData unchanged, so
+  // v1 defaults produce v1-bit-identical output.
+  const adjusted = saturationAdjust(sourceImageData, msg.saturation ?? 0);
 
-  // Step 3: Wu quantization to a 16-color palette.
+  // Step 3: area-average downscale (pure JS, no canvas resize).
+  const downscaled = areaAverageDownscale(adjusted, width, height);
+
+  // Step 4: Wu quantization to a 16-color palette.
   const quantized = quantizePalette(downscaled, DEFAULT_PALETTE_SIZE);
 
   const result: ProcessResult = {

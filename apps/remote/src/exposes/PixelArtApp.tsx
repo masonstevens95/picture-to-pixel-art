@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
 import DropZone from "../components/DropZone";
 import ResolutionSlider from "../components/ResolutionSlider";
+import SaturationSlider from "../components/SaturationSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
 import { usePixelArtPipeline } from "../hooks/usePixelArtPipeline";
 import { downloadResultAsPng } from "../pipeline/exportPng";
@@ -19,11 +21,13 @@ import type { ValidLongEdge } from "../pipeline/protocol";
  */
 
 const DEFAULT_RESOLUTION: ValidLongEdge = 64;
+const DEFAULT_SATURATION = 0;
 
 export default function PixelArtApp() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [resolution, setResolution] = useState<ValidLongEdge>(DEFAULT_RESOLUTION);
+  const [saturation, setSaturation] = useState<number>(DEFAULT_SATURATION);
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -64,7 +68,7 @@ export default function PixelArtApp() {
         // before sending to keep our retained reference valid for the next
         // resolution change.
         const transferable = await createImageBitmap(bitmap);
-        process(transferable, resolution);
+        process(transferable, resolution, { saturation });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
         // separate path. Surface them via a synthetic error state.
@@ -77,7 +81,7 @@ export default function PixelArtApp() {
     return () => {
       cancelled = true;
     };
-  }, [sourceFile, resolution, process]);
+  }, [sourceFile, resolution, saturation, process]);
 
   // Cleanup retained source bitmap on unmount.
   useEffect(() => {
@@ -131,6 +135,15 @@ export default function PixelArtApp() {
       <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
         <ResolutionSlider value={resolution} onChange={setResolution} disabled={!hasImage} />
       </div>
+
+      {/*
+        Per design-lens doc-review feedback: every Advanced control follows a
+        uniform "rendered-but-disabled when no image is loaded" policy. Keeps
+        the panel discoverable even pre-drop without producing silent no-ops.
+      */}
+      <AdvancedControlsPanel>
+        <SaturationSlider value={saturation} onChange={setSaturation} disabled={!hasImage} />
+      </AdvancedControlsPanel>
 
       <SideBySidePreview
         sourceUrl={sourceUrl}
