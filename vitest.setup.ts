@@ -10,6 +10,17 @@
  * exercised in browser-mode tests via Playwright when those land.
  */
 
+// URL.createObjectURL / revokeObjectURL are missing in jsdom by default.
+// Tests spy on them; we need them to exist on the URL constructor before
+// `vi.spyOn` can replace them.
+if (typeof URL.createObjectURL !== "function") {
+  (URL as unknown as { createObjectURL: (b: unknown) => string }).createObjectURL = () =>
+    "blob:jsdom-stub";
+}
+if (typeof URL.revokeObjectURL !== "function") {
+  (URL as unknown as { revokeObjectURL: (s: string) => void }).revokeObjectURL = () => undefined;
+}
+
 // Worker polyfill — no-op stub. Real worker behavior is exercised in
 // browser-mode tests (Playwright). For jsdom, we just need the constructor
 // to exist so usePixelArtPipeline's defaultWorkerFactory can run without

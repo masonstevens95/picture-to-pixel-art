@@ -3,6 +3,7 @@ import DropZone from "../components/DropZone";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
 import { usePixelArtPipeline } from "../hooks/usePixelArtPipeline";
+import { downloadResultAsPng } from "../pipeline/exportPng";
 import type { ValidLongEdge } from "../pipeline/protocol";
 
 /**
@@ -107,7 +108,13 @@ export default function PixelArtApp() {
     setSourceFile(null);
   }, []);
 
+  const handleExport = useCallback(() => {
+    if (!state.result) return;
+    void downloadResultAsPng(state.result);
+  }, [state.result]);
+
   const hasImage = sourceFile !== null;
+  const canExport = state.status === "ready" && state.result !== null;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
@@ -132,6 +139,18 @@ export default function PixelArtApp() {
         errorMessage={state.error?.message}
         onRetry={handleRetry}
       />
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={!canExport}
+          className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 shadow transition-colors hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Download PNG
+          {state.result && ` (${state.result.width}×${state.result.height})`}
+        </button>
+      </div>
     </div>
   );
 }
