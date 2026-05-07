@@ -17,23 +17,38 @@ set -euo pipefail
 REMOTE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$REMOTE_ROOT/dist"
 ASSETS="$DIST/assets"
-# Hard ceiling per v3 plan + scope-guardian doc-review.
+# Hard ceiling per v3 plan + scope-guardian doc-review, updated for v4.
 #
 # Sizing rationale (raw, not gzipped):
 #   v1 final exposed chunk:  8886 bytes (~3 KB gzipped)
 #   v2 final exposed chunk: 20810 bytes (~6.6 KB gzipped)
 #   v3 final exposed chunk: 31169 bytes (~8.67 KB gzipped)
-#   v2 → v3 delta gzipped: ~2 KB. Growth attributed to: 4 new pipeline
-#   transforms (outline, posterize, silhouette, chunky), 5 new component
-#   files, filter preset catalog, StyleSelector with modified-state logic,
-#   and ~7 new optional fields on the worker protocol.
-#   Ceiling set at v3-measured + 2 KB headroom = 34000 bytes raw.
+#   v4 final exposed chunk: 38149 bytes (~10.25 KB gzipped)
+#
+#   v3 → v4 delta raw: +6980 bytes. v4 plan budgeted up to 110 KB (3.2x
+#   v3) anticipating the ORT-Web JS adapter, MediaPipe Tasks shim, and
+#   ML/ scaffolding could land in the exposed chunk. The actual outcome
+#   landed far under that ceiling because Vite's lazy `import('onnxruntime-web/wasm')`
+#   and `import('@mediapipe/tasks-vision')` (and the `worker.format: 'es'`
+#   config that allows code-splitting inside the worker) pushed all the
+#   ML weight into separate chunks loaded on demand:
+#     dist/assets/pixelArtWorker-*.js     ~70 KB  worker bundle
+#     dist/assets/ort.wasm.bundle.min-*.js ~71 KB  ORT JS adapter (lazy)
+#     dist/assets/vision_bundle-*.js      ~138 KB  MediaPipe Tasks shim (lazy)
+#     dist/assets/ort-wasm-simd-threaded-*.wasm ~12.5 MB  ORT WASM binary (lazy)
+#
+#   Growth in the exposed chunk itself is from 5 new components
+#   (SmoothnessControl, FaceBoostToggle, ModelLoadIndicator,
+#   FirstRenderSpinner, DegradedModeNotice), extended FilterPreset, and
+#   ml-status / first-render protocol message types. The ML adapters
+#   themselves are NOT in the exposed chunk.
+#
+#   Ceiling set at v4-measured + ~3 KB headroom = 41000 bytes raw.
 #
 # Builds that exceed this fail loudly so the budget stays enforced, not
-# aspirational. If a future change pushes past 34 KB, that's the signal
-# to revisit (likely the filter catalog should move to a separate chunk
-# or an additional component should be re-evaluated).
-MAX_EXPOSED_CHUNK_BYTES=34000
+# aspirational. If a future change pushes past 41 KB, that's the signal
+# to revisit — likely a heavy import has accidentally become eager.
+MAX_EXPOSED_CHUNK_BYTES=41000
 
 fail() {
   echo "VERIFY FAIL: $*" >&2
@@ -57,6 +72,38 @@ if grep -qE 'ReactCurrentDispatcher|ReactCurrentOwner' "$EXPOSED_CHUNK"; then
   fail "Exposed chunk contains React internals — React appears to be bundled into the remote"
 fi
 
+# v4 ML-not-bundled check (multi-pronged per doc-review).
+#
+# v4 lazy-loads ORT-Web (~5MB JS+WASM) and MediaPipe Tasks (~3-4MB .task) on
+# first cartoon-filter use. Models live in browser Cache Storage, NOT in the
+# JS chunk. If any of these checks fail, an import accidentally became eager
+# or a model file slipped into the build output.
+
+# 1. No .onnx or .task model files emitted as assets.
+if find "$ASSETS" -maxdepth 1 -type f \( -name '*.onnx' -o -name '*.task' \) | grep -q .; then
+  fail "dist/assets/ contains a model file (.onnx or .task) — model assets must NOT be bundled; they are fetched at runtime from external CDNs into Cache Storage"
+fi
+
+# 2. ORT and MediaPipe runtimes must be SEPARATE chunks (lazy), not inlined into
+#    the exposed chunk. Detect by absence of obvious ORT/MediaPipe bundle markers
+#    in the exposed chunk. (Their lazy chunks live alongside in dist/assets/.)
+if grep -qE 'onnxruntime-web|InferenceSession\.create' "$EXPOSED_CHUNK"; then
+  fail "Exposed chunk references ORT runtime directly — onnxruntime-web should be lazy-imported in the worker only"
+fi
+if grep -qE 'FaceLandmarker|FilesetResolver' "$EXPOSED_CHUNK"; then
+  fail "Exposed chunk references MediaPipe Tasks directly — @mediapipe/tasks-vision should be lazy-imported in the worker only"
+fi
+
+# 3. Confirm the lazy chunks DO exist (proves the imports are split, not just absent).
+if ! find "$ASSETS" -maxdepth 1 -type f -name 'ort.wasm.bundle*.js' | grep -q .; then
+  fail "ORT lazy chunk (ort.wasm.bundle*.js) not found in dist/assets/ — ORT may not be split as expected"
+fi
+if ! find "$ASSETS" -maxdepth 1 -type f -name 'vision_bundle*.js' | grep -q .; then
+  fail "MediaPipe lazy chunk (vision_bundle*.js) not found in dist/assets/ — MediaPipe may not be split as expected"
+fi
+
 echo "VERIFY OK"
 echo "  remoteEntry.js: $(wc -c <"$DIST/remoteEntry.js" | tr -d ' ') bytes"
 echo "  exposed chunk:  $(basename "$EXPOSED_CHUNK") ($CHUNK_BYTES bytes)"
+echo "  ML chunks: lazy-loaded ORT + MediaPipe + worker (separate chunks)"
+echo "  Model files: NOT bundled (fetched at runtime into Cache Storage)"

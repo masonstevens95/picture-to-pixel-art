@@ -33,4 +33,12 @@ export default defineConfig({
     minify: "esbuild",
     cssCodeSplit: false,
   },
+  // Worker output must be ES modules to support code-splitting / dynamic
+  // imports inside worker code. v4 introduces lazy `import('onnxruntime-web/wasm')`
+  // and `import('@mediapipe/tasks-vision')` inside the worker; the default
+  // `iife` format errors out with "UMD and IIFE output formats are not
+  // supported for code-splitting builds."
+  worker: {
+    format: "es",
+  },
 });

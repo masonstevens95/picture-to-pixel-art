@@ -70,14 +70,15 @@ describe("applyOutline", () => {
   it("high-contrast square produces a black outline along its boundary", () => {
     const src = makeContrastSquare(20, 20);
     const out = applyOutline(src, { enabled: true, width: 1, color: DEFAULT_OUTLINE_COLOR });
-    // Some pixels should be marked outline (black 0,0,0). The pre-existing
-    // black square interior is also black — it just wasn't *added* by
-    // outline. The outline is detected via gradient on the boundary,
-    // overlaying black on top of (already-black) pixels — so the count of
-    // black pixels should be at least the interior count.
+    // XDoG-positioned outline pixels may differ slightly from Sobel's, but
+    // some pixels should still be marked outline (black 0,0,0). The
+    // pre-existing black square interior is also black — but black pixel
+    // count being non-zero is the load-bearing signal.
     const blackCount = countPixelsOfColor(out, [0, 0, 0]);
     expect(blackCount).toBeGreaterThan(0);
-    // White border pixels far from the boundary should remain white.
+    // Far-corner white pixels well outside the square's diffusion band
+    // should remain white. The XDoG Gaussian (σ=0.4) only diffuses ~1px,
+    // so corner (0,0) is comfortably outside the boundary band.
     expect(out.data[0]).toBe(255);
   });
 
@@ -116,13 +117,13 @@ describe("applyOutline", () => {
     expect(out.data[3]).toBe(0);
   });
 
-  it("1x1 input returns input unchanged (too small for Sobel)", () => {
+  it("1x1 input returns input unchanged (below outline minimum dim)", () => {
     const src = makeSolid(1, 1, 200, 100, 50);
     const out = applyOutline(src, { enabled: true, width: 2, color: [0, 0, 0] });
     expect(out).toBe(src);
   });
 
-  it("2x2 input returns input unchanged (too small for Sobel)", () => {
+  it("2x2 input returns input unchanged (below outline minimum dim)", () => {
     const src = makeSolid(2, 2, 200, 100, 50);
     const out = applyOutline(src, { enabled: true, width: 1, color: [0, 0, 0] });
     expect(out).toBe(src);

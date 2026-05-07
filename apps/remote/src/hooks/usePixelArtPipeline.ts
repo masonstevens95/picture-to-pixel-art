@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  isFirstRenderEndMessage,
+  isFirstRenderStartMessage,
+  isMLErrorMessage,
+  isMLStatusMessage,
   isProcessResult,
   isWorkerError,
+  type MLErrorMessage,
+  type MLStage,
+  type MLStatusMessage,
   type ProcessRequest,
   type ProcessResult,
   type WorkerErrorMessage,
@@ -22,10 +29,37 @@ const DEFAULT_DEBOUNCE_MS = 16;
 
 export type PipelineStatus = "idle" | "processing" | "ready" | "error";
 
+/**
+ * v4 ML status surfaced to the UI. One entry per stage; absent stage means
+ * "never attempted" (the U2-NetP / Face Landmarker hasn't been hit yet).
+ *
+ * U8 reads this slice to drive the ModelLoadIndicator (loading) and
+ * DegradedModeNotice (failed) components.
+ */
+export type MLPhase = "loading" | "ready" | "failed";
+
+export type MLStatusMap = Partial<Record<MLStage, MLPhase>>;
+
 export interface PipelineState {
   status: PipelineStatus;
   result: ProcessResult | null;
   error: WorkerErrorMessage | null;
+  /** Latest phase emitted per ML stage. Empty until first stage attempt. */
+  mlStatus: MLStatusMap;
+  /** Latest ml-error per stage. Cleared only across hook remounts. */
+  mlError: MLErrorMessage | null;
+  /**
+   * U8 first-render lifecycle. True between a `first-render-start` and the
+   * matching `first-render-end` for the most-recently dispatched source.
+   * Drives the FirstRenderSpinner overlay on the result pane.
+   *
+   * The hook does NOT track sourceId — the worker's emit cadence (one
+   * pair per new source) means a simple boolean is sufficient. If the
+   * worker becomes capable of overlapping renders for different sources
+   * in the future, this can be promoted to a `Set<string>` without
+   * changing the protocol.
+   */
+  firstRenderActive: boolean;
 }
 
 export interface UsePixelArtPipelineOptions {
@@ -39,6 +73,13 @@ export interface UsePixelArtPipelineOptions {
 }
 
 export interface ProcessOptions {
+  /**
+   * v4 opaque source identity. Required — every dispatch carries one.
+   * The component mints a fresh UUID on each new file load and forwards
+   * the same id for every subsequent dispatch on the same file. The
+   * worker keys its source cache on this id.
+   */
+  sourceId: string;
   /** -1..+1, default 0. Forwarded as ProcessRequest.saturation. */
   saturation?: number;
   /** Width/height. Undefined preserves source aspect (v1 default). */
@@ -60,11 +101,32 @@ export interface ProcessOptions {
   chunkSize?: number;
   /** v3 palette size override. Undefined = 16 (v2 default). */
   paletteSize?: number;
+  /**
+   * v4 cartoon-smoothing strength. Undefined = 'off' = identity (R12).
+   * Forwarded as ProcessRequest.smoothness; the worker's source cache keys
+   * its bilateral output on this value.
+   */
+  smoothness?: "off" | "low" | "medium" | "high";
+  /**
+   * v4 silhouette quality. Undefined = 'fast' (v3 naive corner-sample;
+   * R12 invariant). 'smart' triggers the U2-NetP path in the worker;
+   * model load failure falls back to 'fast' and emits an `ml-error`
+   * outbound message that the hook reflects in `state.mlError`.
+   */
+  silhouetteQuality?: "fast" | "smart";
+  /**
+   * v4 face-aware contrast boost gate (U6). Undefined / false = R12
+   * baseline; the worker MUST skip MediaPipe Face Landmarker detection
+   * entirely (no model load on the default path). True triggers the
+   * U6 detect + boost stage; failures emit an `ml-error` outbound and
+   * fall back to identity (no boost applied).
+   */
+  faceAwareEnabled?: boolean;
 }
 
 export interface UsePixelArtPipelineApi {
   state: PipelineState;
-  process: (bitmap: ImageBitmap, targetLongEdge: number, options?: ProcessOptions) => void;
+  process: (bitmap: ImageBitmap, targetLongEdge: number, options: ProcessOptions) => void;
 }
 
 const defaultWorkerFactory = (): Worker =>
@@ -79,6 +141,9 @@ export function usePixelArtPipeline(
     status: "idle",
     result: null,
     error: null,
+    mlStatus: {},
+    mlError: null,
+    firstRenderActive: false,
   });
 
   const workerRef = useRef<Worker | null>(null);
@@ -114,18 +179,48 @@ export function usePixelArtPipeline(
       const msg = event.data;
       if (isProcessResult(msg)) {
         if (msg.jobId !== latestJobIdRef.current) return; // superseded
-        setState({ status: "ready", result: msg, error: null });
+        setState((prev) => ({ ...prev, status: "ready", result: msg, error: null }));
         return;
       }
       if (isWorkerError(msg)) {
         if (msg.jobId !== latestJobIdRef.current) return;
-        setState({ status: "error", result: null, error: msg });
+        setState((prev) => ({ ...prev, status: "error", result: null, error: msg }));
+        return;
+      }
+      // ML status / error messages are not jobId-keyed — they are session-
+      // level signals (the model loaded once for the whole session, so the
+      // status reflects the most recent transition regardless of which job
+      // triggered it). We merge into state without affecting `status`/`result`.
+      if (isMLStatusMessage(msg)) {
+        const update = msg as MLStatusMessage;
+        setState((prev) => ({
+          ...prev,
+          mlStatus: { ...prev.mlStatus, [update.stage]: update.phase },
+        }));
+        return;
+      }
+      if (isMLErrorMessage(msg)) {
+        const update = msg as MLErrorMessage;
+        setState((prev) => ({ ...prev, mlError: update }));
+        return;
+      }
+      // U8 first-render-* lifecycle. Not jobId-keyed — the worker emits
+      // them once per new sourceId regardless of which job triggered the
+      // first dispatch. The hook just toggles a boolean; PixelArtApp wires
+      // it to FirstRenderSpinner.
+      if (isFirstRenderStartMessage(msg)) {
+        setState((prev) => ({ ...prev, firstRenderActive: true }));
+        return;
+      }
+      if (isFirstRenderEndMessage(msg)) {
+        setState((prev) => ({ ...prev, firstRenderActive: false }));
+        return;
       }
     }
   }, [workerFactory]);
 
   const process = useCallback(
-    (bitmap: ImageBitmap, targetLongEdge: number, options: ProcessOptions = {}) => {
+    (bitmap: ImageBitmap, targetLongEdge: number, options: ProcessOptions) => {
       if (!Number.isFinite(targetLongEdge) || targetLongEdge <= 0) {
         // Reject at the boundary — don't dispatch garbage to the worker.
         bitmap.close();
@@ -160,6 +255,7 @@ export function usePixelArtPipeline(
           jobId,
           bitmap: queued.bitmap,
           targetLongEdge: queued.targetLongEdge,
+          sourceId: queued.options.sourceId,
           saturation: queued.options.saturation,
           aspectRatio: queued.options.aspectRatio,
           fixedPalette: queued.options.fixedPalette,
@@ -172,6 +268,9 @@ export function usePixelArtPipeline(
           silhouetteTolerance: queued.options.silhouetteTolerance,
           chunkSize: queued.options.chunkSize,
           paletteSize: queued.options.paletteSize,
+          smoothness: queued.options.smoothness,
+          silhouetteQuality: queued.options.silhouetteQuality,
+          faceAwareEnabled: queued.options.faceAwareEnabled,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

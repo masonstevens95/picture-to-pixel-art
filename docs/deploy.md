@@ -133,4 +133,50 @@ Run after every fresh deploy to confirm the host can actually load the remote:
 4. **Standalone harness loads.** Visit the harness URL cold; the drop zone, slider, and preview render with no console errors.
 5. **End-to-end flow.** Drop a JPEG, drag the resolution slider through 16 → 256, and click Download PNG. Confirm the downloaded file opens at its native pixel size.
 
+---
+
+## v4 ML model hosting
+
+v4 adds two browser-side ML models loaded lazily on first cartoon-filter use:
+
+- **U2-NetP segmentation** (~5 MB ONNX) — used by the Smart silhouette path on Asset filter and any user opt-in. Hosted at `https://huggingface.co/BritishWerewolf/U-2-Netp/resolve/main/u2netp.onnx`. Configured in `apps/remote/src/ml/runtime.ts` and `apps/remote/src/ml/segmentation.ts` (search for the URL constant).
+- **MediaPipe Face Landmarker** (~3-4 MB `.task` bundle) — used by the face-aware contrast boost on Portrait filter. Hosted at `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task` plus the WASM fileset at `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm`. The MediaPipe SDK version is **pinned exactly** (no `^` or `latest`) per the security review — jsDelivr resolves `latest` at edge, and a compromised npm release would propagate. Update the pin deliberately and only after re-validating the model behavior.
+
+### Cache Storage
+
+Both models are cached in the browser's Cache Storage under cache name `pixelart-models-v1`. The cache is keyed on the full URL, so changing the model URL invalidates the cache automatically.
+
+The runtime layer (`apps/remote/src/ml/runtime.ts`) implements **corrupt-cache self-heal**: if `InferenceSession.create` fails on a cached ArrayBuffer (corrupt or truncated entry), the cached entry is evicted and the model is re-fetched once before surfacing an `MLRuntimeError`. Without this, a partial download would permanently degrade the user.
+
+### Model version-bump procedure
+
+When changing model URLs (e.g., switching from HF Hub direct to a self-hosted CDN, or swapping U2-NetP for BiRefNet-lite):
+
+1. Update the URL constant in the relevant `apps/remote/src/ml/*.ts` file.
+2. **Bump the cache version**: change `pixelart-models-v1` to `pixelart-models-v2` in `apps/remote/src/ml/modelCache.ts`. This invalidates the entire cache on the next visit.
+3. The `purgeOldCaches()` helper deletes any cache name with the `pixelart-models-` prefix that is not in the current allow-list (preserves host-page caches). It runs once on first model load.
+4. Mobile Safari evicts script-writable storage after ~7 days of inactivity. Returning users will re-download the models with the progress UI; this is acceptable and documented.
+
+### CDN trust + supply chain
+
+Both default URLs are external CDNs (HuggingFace + jsDelivr/Google). For production, prefer self-hosting with hashed filenames in Cloudflare R2 or similar — the URL is configurable. Without SRI verification, a CDN compromise could deliver a tampered model:
+
+- The U2-NetP `.onnx` model is binary weights — a tampered version produces wrong inference output (bad masks), not code execution.
+- The MediaPipe `.task` bundle includes WASM and JS glue executed in the worker — a tampered version is closer to a code-execution risk. Keep the SDK pin exact and consider adding SRI on the `.task` URL before scaling beyond a portfolio piece.
+
+### ML-disabled smoke test
+
+After deploy, verify graceful degradation:
+
+1. Open DevTools → Application → Storage → Clear `pixelart-models-v1` cache.
+2. Load the page in offline mode (DevTools → Network → Offline).
+3. Drop an image and pick the Asset filter.
+4. Confirm: `DegradedModeNotice` appears with copy "Smart cutout unavailable — using basic background detection."
+5. Confirm: the result still renders using v3-quality naive corner-sample silhouette.
+6. Re-enable network, reload, drop again, pick Asset — `ModelLoadIndicator` appears, then `FirstRenderSpinner`, then a high-quality cutout.
+
+### Worker output format
+
+`apps/remote/vite.config.ts` sets `worker: { format: 'es' }` to support code-splitting and dynamic imports inside worker code. ORT-Web (`onnxruntime-web/wasm`) and MediaPipe Tasks are both lazy-imported inside the worker; the default `iife` worker format does not support code-splitting. If a future change reverts this config, the production build will fail at the `vite:worker-import-meta-url` plugin.
+
 If any step fails, do not promote the host integration — the remote is not deploy-ready.

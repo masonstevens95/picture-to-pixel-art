@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  isFirstRenderEndMessage,
+  isFirstRenderStartMessage,
+  isMLErrorMessage,
+  isMLStatusMessage,
   isProcessResult,
   isValidLongEdge,
   isWorkerError,
@@ -53,6 +57,45 @@ describe("protocol type guards", () => {
     ).toBe(false);
     expect(isProcessResult(null)).toBe(false);
     expect(isProcessResult("nope")).toBe(false);
+  });
+
+  it("isMLStatusMessage validates shape", () => {
+    expect(
+      isMLStatusMessage({ type: "ml-status", stage: "segmentation", phase: "loading" }),
+    ).toBe(true);
+    expect(
+      isMLStatusMessage({ type: "ml-status", stage: "face-landmarks", phase: "ready" }),
+    ).toBe(true);
+    expect(isMLStatusMessage({ type: "ml-status", stage: "segmentation" })).toBe(false);
+    expect(isMLStatusMessage({ type: "result", stage: "segmentation", phase: "loading" })).toBe(
+      false,
+    );
+    expect(isMLStatusMessage(null)).toBe(false);
+  });
+
+  it("isMLErrorMessage validates shape", () => {
+    expect(
+      isMLErrorMessage({ type: "ml-error", stage: "segmentation", code: "model_load_failed" }),
+    ).toBe(true);
+    expect(isMLErrorMessage({ type: "ml-error", stage: "segmentation" })).toBe(false);
+    expect(
+      isMLErrorMessage({ type: "ml-status", stage: "segmentation", code: "model_load_failed" }),
+    ).toBe(false);
+  });
+
+  it("isFirstRenderStartMessage validates shape", () => {
+    expect(
+      isFirstRenderStartMessage({ type: "first-render-start", sourceId: "abc" }),
+    ).toBe(true);
+    expect(isFirstRenderStartMessage({ type: "first-render-start" })).toBe(false);
+    expect(isFirstRenderStartMessage({ type: "first-render-end", sourceId: "abc" })).toBe(false);
+    expect(isFirstRenderStartMessage(null)).toBe(false);
+  });
+
+  it("isFirstRenderEndMessage validates shape", () => {
+    expect(isFirstRenderEndMessage({ type: "first-render-end", sourceId: "abc" })).toBe(true);
+    expect(isFirstRenderEndMessage({ type: "first-render-end" })).toBe(false);
+    expect(isFirstRenderEndMessage({ type: "first-render-start", sourceId: "abc" })).toBe(false);
   });
 
   it("isWorkerError validates shape", () => {

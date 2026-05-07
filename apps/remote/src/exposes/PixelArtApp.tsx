@@ -3,20 +3,26 @@ import { dialsMatchPreset, FILTERS, type FilterId } from "../filters";
 import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
 import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRatioSelect";
 import BrandColorsTextarea from "../components/BrandColorsTextarea";
+import DegradedModeNotice from "../components/DegradedModeNotice";
 import DropZone from "../components/DropZone";
+import ModelLoadIndicator from "../components/ModelLoadIndicator";
 import OutlineControl, { type OutlineControlValue } from "../components/OutlineControl";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
 import ChunkyPixelsControl from "../components/ChunkyPixelsControl";
 import PaletteSizeControl from "../components/PaletteSizeControl";
 import PosterizationControl from "../components/PosterizationControl";
+import FaceBoostToggle from "../components/FaceBoostToggle";
 import SilhouetteControl, {
   DEFAULT_SILHOUETTE_TOLERANCE,
+  type SilhouetteQuality,
 } from "../components/SilhouetteControl";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
+import SmoothnessControl from "../components/SmoothnessControl";
 import StyleSelector, { type StyleSelectorValue } from "../components/StyleSelector";
 import { usePixelArtPipeline } from "../hooks/usePixelArtPipeline";
+import type { SmoothnessLevel } from "../pipeline/bilateral";
 import { downloadResultAsPng } from "../pipeline/exportPng";
 import { CURATED_PALETTES, type CuratedPaletteId, type RGB } from "../pipeline/palettes";
 import type { ValidLongEdge } from "../pipeline/protocol";
@@ -39,6 +45,13 @@ const DEFAULT_SATURATION = 0;
 export default function PixelArtApp() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
+  /**
+   * v4 source identity. Minted once per file load via `crypto.randomUUID()`
+   * and forwarded on every ProcessRequest for that file. Same file = same
+   * id (cache reuse); new file = new id (cache eviction). The host portfolio
+   * targets evergreen browsers, where `crypto.randomUUID()` is universal.
+   */
+  const [sourceId, setSourceId] = useState<string | null>(null);
   const [resolution, setResolution] = useState<ValidLongEdge>(DEFAULT_RESOLUTION);
   const [saturation, setSaturation] = useState<number>(DEFAULT_SATURATION);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioValue>(undefined);
@@ -58,8 +71,21 @@ export default function PixelArtApp() {
   const [silhouetteTolerance, setSilhouetteTolerance] = useState<number>(
     DEFAULT_SILHOUETTE_TOLERANCE,
   );
+  // v4 silhouette quality. Default 'fast' preserves R12 byte-identical
+  // output (and matches the Custom filter's preset). Filters that opt into
+  // ML segmentation (Asset, in U7) set this to 'smart' on apply.
+  const [silhouetteQuality, setSilhouetteQuality] = useState<SilhouetteQuality>("fast");
   const [chunkSize, setChunkSize] = useState(1);
   const [paletteSize, setPaletteSize] = useState(16);
+  // v4 cartoon-smoothing. Default 'off' is the R12 identity path; the
+  // worker bilateral stage short-circuits and the source cache stores the
+  // input by reference.
+  const [smoothness, setSmoothness] = useState<SmoothnessLevel>("off");
+  // v4 face-aware contrast boost (U6). Default false is the R12 baseline:
+  // the worker MUST skip MediaPipe `detectLandmarks` entirely when this is
+  // false (no `.task` fetch, no `import('@mediapipe/tasks-vision')`).
+  // U7 sets this to `true` for the Portrait filter.
+  const [faceAwareEnabled, setFaceAwareEnabled] = useState<boolean>(false);
   // v3 Style state: which filter (if any) the dial state currently matches.
   // 'custom' alone means user is on Custom intentionally; 'custom' with
   // wasFilter set means they drifted from a previously-applied filter.
@@ -72,14 +98,18 @@ export default function PixelArtApp() {
   const { state, process } = usePixelArtPipeline();
 
   // Object-URL lifecycle. Whenever the source file changes, mint a new URL
-  // for the source <img> preview and revoke the previous one.
+  // for the source <img> preview and revoke the previous one. Also mint a
+  // fresh sourceId so the worker treats this as a new source and evicts the
+  // previous source's cache.
   useEffect(() => {
     if (!sourceFile) {
       setSourceUrl(null);
+      setSourceId(null);
       return;
     }
     const url = URL.createObjectURL(sourceFile);
     setSourceUrl(url);
+    setSourceId(crypto.randomUUID());
     return () => {
       URL.revokeObjectURL(url);
     };
@@ -87,7 +117,7 @@ export default function PixelArtApp() {
 
   // Decode source -> ImageBitmap and dispatch when file or resolution changes.
   useEffect(() => {
-    if (!sourceFile) return;
+    if (!sourceFile || !sourceId) return;
     let cancelled = false;
     let bitmap: ImageBitmap | null = null;
 
@@ -113,6 +143,7 @@ export default function PixelArtApp() {
               ? (customPaletteColors ?? undefined)
               : undefined;
         process(transferable, resolution, {
+          sourceId,
           saturation,
           aspectRatio,
           fixedPalette,
@@ -123,8 +154,11 @@ export default function PixelArtApp() {
           posterizeBands,
           silhouetteEnabled,
           silhouetteTolerance,
+          silhouetteQuality,
           chunkSize,
           paletteSize,
+          smoothness,
+          faceAwareEnabled,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -140,6 +174,7 @@ export default function PixelArtApp() {
     };
   }, [
     sourceFile,
+    sourceId,
     resolution,
     saturation,
     aspectRatio,
@@ -151,8 +186,11 @@ export default function PixelArtApp() {
     posterizeBands,
     silhouetteEnabled,
     silhouetteTolerance,
+    silhouetteQuality,
     chunkSize,
     paletteSize,
+    smoothness,
+    faceAwareEnabled,
     process,
   ]);
 
@@ -202,6 +240,11 @@ export default function PixelArtApp() {
     setSilhouetteEnabled(p.silhouetteEnabled);
     setSilhouetteTolerance(p.silhouetteTolerance);
     setChunkSize(p.chunkSize);
+    // v4 dials (U7). React 18 batches all setState calls within an event
+    // handler so these land in the same render as the v3 dials above.
+    setSmoothness(p.smoothness);
+    setFaceAwareEnabled(p.faceAwareEnabled);
+    setSilhouetteQuality(p.silhouetteQuality);
     setActiveStyle(id);
     setWasFilter(null);
   }, []);
@@ -241,6 +284,9 @@ export default function PixelArtApp() {
         silhouetteEnabled,
         silhouetteTolerance,
         chunkSize,
+        smoothness,
+        faceAwareEnabled,
+        silhouetteQuality,
       },
       preset,
     );
@@ -261,6 +307,9 @@ export default function PixelArtApp() {
     silhouetteEnabled,
     silhouetteTolerance,
     chunkSize,
+    smoothness,
+    faceAwareEnabled,
+    silhouetteQuality,
   ]);
 
   const handleExport = useCallback(() => {
@@ -298,6 +347,18 @@ export default function PixelArtApp() {
           onReset={handleResetFilter}
         />
       </div>
+
+      {/*
+        U8 ML status surfaces. The two share a layout-reserved slot below the
+        StyleSelector (ModelLoadIndicator carries `min-h-10`). They are
+        mutually exclusive PER STAGE — a stage transitioning loading -> ready
+        / failed swaps which one renders without layout jitter. When two
+        stages are in different phases (e.g. segmentation loading while
+        face-landmarks failed) both surfaces render simultaneously; they
+        occupy adjacent vertical space.
+      */}
+      <ModelLoadIndicator mlStatus={state.mlStatus} />
+      <DegradedModeNotice mlStatus={state.mlStatus} />
 
       <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
         <ResolutionSlider value={resolution} onChange={setResolution} disabled={!hasImage} />
@@ -339,12 +400,22 @@ export default function PixelArtApp() {
           tolerance={silhouetteTolerance}
           onEnabledChange={setSilhouetteEnabled}
           onToleranceChange={setSilhouetteTolerance}
+          quality={silhouetteQuality}
+          onQualityChange={setSilhouetteQuality}
+          mlAvailable={state.mlStatus.segmentation !== "failed"}
           disabled={!hasImage}
         />
         <ChunkyPixelsControl chunkSize={chunkSize} onChange={setChunkSize} disabled={!hasImage} />
         <PaletteSizeControl
           paletteSize={paletteSize}
           onChange={setPaletteSize}
+          disabled={!hasImage}
+        />
+        <SmoothnessControl value={smoothness} onChange={setSmoothness} disabled={!hasImage} />
+        <FaceBoostToggle
+          enabled={faceAwareEnabled}
+          onChange={setFaceAwareEnabled}
+          mlAvailable={state.mlStatus["face-landmarks"] !== "failed"}
           disabled={!hasImage}
         />
       </AdvancedControlsPanel>
@@ -355,6 +426,7 @@ export default function PixelArtApp() {
         status={state.status}
         errorMessage={state.error?.message}
         onRetry={handleRetry}
+        firstRenderActive={state.firstRenderActive}
       />
 
       <div className="flex justify-end">

@@ -22,6 +22,10 @@ describe("FILTERS catalog", () => {
       expect(typeof f.silhouetteEnabled).toBe("boolean");
       expect(f.chunkSize).toBeGreaterThanOrEqual(1);
       expect(f.chunkSize).toBeLessThanOrEqual(4);
+      // v4 fields (U7) — every preset must declare values for these.
+      expect(["off", "low", "medium", "high"]).toContain(f.smoothness);
+      expect(typeof f.faceAwareEnabled).toBe("boolean");
+      expect(["fast", "smart"]).toContain(f.silhouetteQuality);
     }
   });
 
@@ -37,6 +41,53 @@ describe("FILTERS catalog", () => {
     for (const id of ["art-piece", "environment"] as const) {
       expect(FILTERS[id].outlineEnabled).toBe(false);
       expect(FILTERS[id].posterizeBands).toBeUndefined();
+    }
+  });
+
+  // ---- v4 (U7) per-filter assertions ----
+
+  it("Asset filter defaults to silhouetteQuality=smart (Covers AE2)", () => {
+    expect(FILTERS.asset.silhouetteQuality).toBe("smart");
+  });
+
+  it("Portrait filter raises resolution to 192 and enables faceAware (Covers AE4)", () => {
+    expect(FILTERS.portrait.resolution).toBe(192);
+    expect(FILTERS.portrait.faceAwareEnabled).toBe(true);
+  });
+
+  it("Portrait filter uses medium smoothing and thin black outline + posterize 6", () => {
+    expect(FILTERS.portrait.smoothness).toBe("medium");
+    expect(FILTERS.portrait.outlineEnabled).toBe(true);
+    expect(FILTERS.portrait.outlineWidth).toBe(1);
+    expect(FILTERS.portrait.outlineColor).toEqual([0, 0, 0]);
+    expect(FILTERS.portrait.posterizeBands).toBe(6);
+  });
+
+  it("Units filter uses medium smoothing; v3 dial values unchanged", () => {
+    expect(FILTERS.units.smoothness).toBe("medium");
+    expect(FILTERS.units.faceAwareEnabled).toBe(false);
+    expect(FILTERS.units.silhouetteQuality).toBe("fast");
+    // v3 invariant values.
+    expect(FILTERS.units.outlineEnabled).toBe(true);
+    expect(FILTERS.units.outlineWidth).toBe(3);
+    expect(FILTERS.units.posterizeBands).toBe(4);
+    expect(FILTERS.units.chunkSize).toBe(2);
+  });
+
+  it("Asset filter uses low smoothing; v3 dials (resolution 48, thick outline) unchanged", () => {
+    expect(FILTERS.asset.smoothness).toBe("low");
+    expect(FILTERS.asset.faceAwareEnabled).toBe(false);
+    expect(FILTERS.asset.resolution).toBe(48);
+    expect(FILTERS.asset.outlineEnabled).toBe(true);
+    expect(FILTERS.asset.outlineWidth).toBe(3);
+    expect(FILTERS.asset.posterizeBands).toBe(4);
+  });
+
+  it("Art piece and Environment keep smoothness=off (painterly, no smoothing)", () => {
+    for (const id of ["art-piece", "environment"] as const) {
+      expect(FILTERS[id].smoothness).toBe("off");
+      expect(FILTERS[id].faceAwareEnabled).toBe(false);
+      expect(FILTERS[id].silhouetteQuality).toBe("fast");
     }
   });
 });
@@ -69,6 +120,9 @@ function presetDials(presetId: keyof typeof FILTERS) {
     silhouetteEnabled: p.silhouetteEnabled,
     silhouetteTolerance: p.silhouetteTolerance,
     chunkSize: p.chunkSize,
+    smoothness: p.smoothness,
+    faceAwareEnabled: p.faceAwareEnabled,
+    silhouetteQuality: p.silhouetteQuality,
   };
 }
 
@@ -121,5 +175,34 @@ describe("dialsMatchPreset", () => {
     const dials = presetDials("environment");
     dials.aspectRatio = undefined;
     expect(dialsMatchPreset(dials, FILTERS.environment)).toBe(false);
+  });
+
+  // ---- v4 (U7) edge cases ----
+
+  it("flips to modified when only smoothness diverges", () => {
+    const dials = presetDials("portrait");
+    expect(dialsMatchPreset(dials, FILTERS.portrait)).toBe(true);
+    dials.smoothness = "high";
+    expect(dialsMatchPreset(dials, FILTERS.portrait)).toBe(false);
+  });
+
+  it("flips to modified when only faceAwareEnabled diverges", () => {
+    const dials = presetDials("portrait");
+    expect(dialsMatchPreset(dials, FILTERS.portrait)).toBe(true);
+    dials.faceAwareEnabled = !FILTERS.portrait.faceAwareEnabled;
+    expect(dialsMatchPreset(dials, FILTERS.portrait)).toBe(false);
+  });
+
+  it("flips to modified when only silhouetteQuality diverges", () => {
+    const dials = presetDials("asset");
+    expect(dialsMatchPreset(dials, FILTERS.asset)).toBe(true);
+    dials.silhouetteQuality = "fast";
+    expect(dialsMatchPreset(dials, FILTERS.asset)).toBe(false);
+  });
+
+  it("matches all v4 filters with their own preset values", () => {
+    for (const id of FILTER_IDS) {
+      expect(dialsMatchPreset(presetDials(id), FILTERS[id])).toBe(true);
+    }
   });
 });
