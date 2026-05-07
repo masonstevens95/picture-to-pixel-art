@@ -3,7 +3,9 @@ import { dialsMatchPreset, FILTERS, type FilterId } from "../filters";
 import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
 import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRatioSelect";
 import BrandColorsTextarea from "../components/BrandColorsTextarea";
+import DegradedModeNotice from "../components/DegradedModeNotice";
 import DropZone from "../components/DropZone";
+import ModelLoadIndicator from "../components/ModelLoadIndicator";
 import OutlineControl, { type OutlineControlValue } from "../components/OutlineControl";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
 import ChunkyPixelsControl from "../components/ChunkyPixelsControl";
@@ -346,6 +348,18 @@ export default function PixelArtApp() {
         />
       </div>
 
+      {/*
+        U8 ML status surfaces. The two share a layout-reserved slot below the
+        StyleSelector (ModelLoadIndicator carries `min-h-10`). They are
+        mutually exclusive PER STAGE — a stage transitioning loading -> ready
+        / failed swaps which one renders without layout jitter. When two
+        stages are in different phases (e.g. segmentation loading while
+        face-landmarks failed) both surfaces render simultaneously; they
+        occupy adjacent vertical space.
+      */}
+      <ModelLoadIndicator mlStatus={state.mlStatus} />
+      <DegradedModeNotice mlStatus={state.mlStatus} />
+
       <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
         <ResolutionSlider value={resolution} onChange={setResolution} disabled={!hasImage} />
       </div>
@@ -412,6 +426,7 @@ export default function PixelArtApp() {
         status={state.status}
         errorMessage={state.error?.message}
         onRetry={handleRetry}
+        firstRenderActive={state.firstRenderActive}
       />
 
       <div className="flex justify-end">

@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, act, cleanup } from "@testing-library/react";
 import { usePixelArtPipeline } from "../../src/hooks/usePixelArtPipeline";
-import type { ProcessResult, WorkerErrorMessage } from "../../src/pipeline/protocol";
+import type {
+  FirstRenderEndMessage,
+  FirstRenderStartMessage,
+  MLErrorMessage,
+  MLStatusMessage,
+  ProcessResult,
+  WorkerErrorMessage,
+} from "../../src/pipeline/protocol";
 
 /**
  * Hook tests use a hand-rolled MockWorker. The real worker pipeline (with
@@ -71,6 +78,26 @@ class MockWorker {
       message: "boom",
     };
     this.dispatch(err);
+  }
+
+  emitMLStatus(stage: MLStatusMessage["stage"], phase: MLStatusMessage["phase"]): void {
+    const msg: MLStatusMessage = { type: "ml-status", stage, phase };
+    this.dispatch(msg);
+  }
+
+  emitMLError(stage: MLErrorMessage["stage"], code: MLErrorMessage["code"]): void {
+    const msg: MLErrorMessage = { type: "ml-error", stage, code };
+    this.dispatch(msg);
+  }
+
+  emitFirstRenderStart(sourceId: string): void {
+    const msg: FirstRenderStartMessage = { type: "first-render-start", sourceId };
+    this.dispatch(msg);
+  }
+
+  emitFirstRenderEnd(sourceId: string): void {
+    const msg: FirstRenderEndMessage = { type: "first-render-end", sourceId };
+    this.dispatch(msg);
   }
 
   private dispatch(data: unknown): void {
@@ -288,6 +315,104 @@ describe("usePixelArtPipeline", () => {
 
     secondHook.unmount();
     expect(secondWorker.terminated).toBe(true);
+  });
+
+  // ---- U8 status / first-render integration scenarios ----
+
+  it("U8 (Covers F3): ml-status loading -> ready transitions update state.mlStatus per stage", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    expect(result.current.state.mlStatus).toEqual({});
+
+    act(() => {
+      worker.emitMLStatus("segmentation", "loading");
+    });
+    expect(result.current.state.mlStatus.segmentation).toBe("loading");
+
+    act(() => {
+      worker.emitMLStatus("segmentation", "ready");
+    });
+    expect(result.current.state.mlStatus.segmentation).toBe("ready");
+
+    // Independent face-landmarks stage tracking.
+    act(() => {
+      worker.emitMLStatus("face-landmarks", "loading");
+    });
+    expect(result.current.state.mlStatus["face-landmarks"]).toBe("loading");
+    // Segmentation entry is unchanged.
+    expect(result.current.state.mlStatus.segmentation).toBe("ready");
+  });
+
+  it("U8 (Covers F5 / AE8): ml-status failed updates state.mlStatus so DegradedModeNotice can render", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    act(() => {
+      worker.emitMLStatus("segmentation", "failed");
+      worker.emitMLError("segmentation", "model_load_failed");
+    });
+    expect(result.current.state.mlStatus.segmentation).toBe("failed");
+    expect(result.current.state.mlError?.stage).toBe("segmentation");
+    expect(result.current.state.mlError?.code).toBe("model_load_failed");
+  });
+
+  it("U8 (Covers F3): first-render-start sets firstRenderActive=true; first-render-end sets it false", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    expect(result.current.state.firstRenderActive).toBe(false);
+
+    act(() => {
+      worker.emitFirstRenderStart("source-A");
+    });
+    expect(result.current.state.firstRenderActive).toBe(true);
+
+    act(() => {
+      worker.emitFirstRenderEnd("source-A");
+    });
+    expect(result.current.state.firstRenderActive).toBe(false);
+  });
+
+  it("U8: ml-status / first-render messages do NOT touch processing status or stale jobId", () => {
+    vi.useFakeTimers();
+    const worker = new MockWorker();
+    const { result } = renderHook(() =>
+      usePixelArtPipeline({ debounceMs: 16, workerFactory: () => worker as unknown as Worker }),
+    );
+
+    // Run a normal dispatch.
+    act(() => {
+      result.current.process(fakeBitmap(), 64, { sourceId: "s8" });
+      vi.advanceTimersByTime(16);
+    });
+    expect(result.current.state.status).toBe("processing");
+
+    // ml-status / first-render arriving mid-processing must not flip status.
+    act(() => {
+      worker.emitMLStatus("segmentation", "loading");
+      worker.emitFirstRenderStart("s8");
+    });
+    expect(result.current.state.status).toBe("processing");
+    expect(result.current.state.mlStatus.segmentation).toBe("loading");
+    expect(result.current.state.firstRenderActive).toBe(true);
+
+    // The actual result still resolves status normally.
+    act(() => {
+      worker.emitFirstRenderEnd("s8");
+      worker.emitResult(1, 64, 51);
+    });
+    expect(result.current.state.firstRenderActive).toBe(false);
+    expect(result.current.state.status).toBe("ready");
   });
 
   it("dropping a queued bitmap (replaced before debounce flush) closes the old one", () => {

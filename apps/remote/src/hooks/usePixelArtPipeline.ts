@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  isFirstRenderEndMessage,
+  isFirstRenderStartMessage,
   isMLErrorMessage,
   isMLStatusMessage,
   isProcessResult,
@@ -46,6 +48,18 @@ export interface PipelineState {
   mlStatus: MLStatusMap;
   /** Latest ml-error per stage. Cleared only across hook remounts. */
   mlError: MLErrorMessage | null;
+  /**
+   * U8 first-render lifecycle. True between a `first-render-start` and the
+   * matching `first-render-end` for the most-recently dispatched source.
+   * Drives the FirstRenderSpinner overlay on the result pane.
+   *
+   * The hook does NOT track sourceId — the worker's emit cadence (one
+   * pair per new source) means a simple boolean is sufficient. If the
+   * worker becomes capable of overlapping renders for different sources
+   * in the future, this can be promoted to a `Set<string>` without
+   * changing the protocol.
+   */
+  firstRenderActive: boolean;
 }
 
 export interface UsePixelArtPipelineOptions {
@@ -129,6 +143,7 @@ export function usePixelArtPipeline(
     error: null,
     mlStatus: {},
     mlError: null,
+    firstRenderActive: false,
   });
 
   const workerRef = useRef<Worker | null>(null);
@@ -187,6 +202,18 @@ export function usePixelArtPipeline(
       if (isMLErrorMessage(msg)) {
         const update = msg as MLErrorMessage;
         setState((prev) => ({ ...prev, mlError: update }));
+        return;
+      }
+      // U8 first-render-* lifecycle. Not jobId-keyed — the worker emits
+      // them once per new sourceId regardless of which job triggered the
+      // first dispatch. The hook just toggles a boolean; PixelArtApp wires
+      // it to FirstRenderSpinner.
+      if (isFirstRenderStartMessage(msg)) {
+        setState((prev) => ({ ...prev, firstRenderActive: true }));
+        return;
+      }
+      if (isFirstRenderEndMessage(msg)) {
+        setState((prev) => ({ ...prev, firstRenderActive: false }));
         return;
       }
     }

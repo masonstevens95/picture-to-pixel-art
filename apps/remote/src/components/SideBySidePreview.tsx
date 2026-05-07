@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import FirstRenderSpinner from "./FirstRenderSpinner";
 
 /**
  * Two-pane preview: source image on the left, pixelated result on the right.
@@ -12,6 +13,11 @@ import { useEffect, useRef } from "react";
  * Status state drives the result pane's visual treatment: `processing` dims
  * any prior result while a new one is in flight, `error` shows a CTA, `idle`
  * shows a waiting placeholder before the first drop.
+ *
+ * U8: when `firstRenderActive` is true the FirstRenderSpinner overlays the
+ * RESULT PANE ONLY (the source pane stays clear so the user sees their
+ * file was accepted). The result pane container is already
+ * `position: relative` so the spinner positions absolutely inside it.
  */
 
 export interface ResultBuffer {
@@ -26,6 +32,11 @@ export interface SideBySidePreviewProps {
   status: "idle" | "processing" | "ready" | "error";
   errorMessage?: string | null;
   onRetry?: () => void;
+  /**
+   * U8: drives the FirstRenderSpinner overlay on the RESULT pane only.
+   * Defaults to false so v1/v2/v3 callers don't need to thread this.
+   */
+  firstRenderActive?: boolean;
 }
 
 export function SideBySidePreview({
@@ -34,6 +45,7 @@ export function SideBySidePreview({
   status,
   errorMessage,
   onRetry,
+  firstRenderActive = false,
 }: SideBySidePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -111,6 +123,9 @@ export function SideBySidePreview({
               Pixel art appears here once you drop a photo.
             </p>
           )}
+          {/* U8 result-pane-only overlay. Source pane intentionally
+              uncovered so the user sees the file they dropped. */}
+          <FirstRenderSpinner active={firstRenderActive} />
         </div>
       </figure>
     </div>

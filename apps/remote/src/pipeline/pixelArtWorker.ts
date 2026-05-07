@@ -1,5 +1,7 @@
 /// <reference lib="webworker" />
 import type {
+  FirstRenderEndMessage,
+  FirstRenderStartMessage,
   MLErrorCode,
   MLErrorMessage,
   MLStatusMessage,
@@ -100,6 +102,25 @@ function emitMLError(stage: MLErrorMessage["stage"], code: MLErrorCode): void {
 }
 
 /**
+ * Per-session set of sourceIds that have already emitted a first-render
+ * pair. Used by U8's spinner — the start/end messages fire at most once
+ * per (worker lifetime, sourceId). Subsequent dispatches for the same
+ * source hit the source-cache and are fast enough to not warrant an
+ * overlay.
+ */
+const firstRenderStartedSourceIds: Set<string> = new Set();
+
+function emitFirstRenderStart(sourceId: string): void {
+  const msg: FirstRenderStartMessage = { type: "first-render-start", sourceId };
+  self.postMessage(msg);
+}
+
+function emitFirstRenderEnd(sourceId: string): void {
+  const msg: FirstRenderEndMessage = { type: "first-render-end", sourceId };
+  self.postMessage(msg);
+}
+
+/**
  * Coerce an unknown thrown value into the wire-shape MLErrorCode. Catches
  * the case where ORT throws something other than our typed error.
  */
@@ -119,6 +140,7 @@ export function __resetWorkerMLStateForTests(): void {
   mlErrorEmitted["face-landmarks"] = false;
   mlStatusEmitted.segmentation = { loading: false, ready: false, failed: false };
   mlStatusEmitted["face-landmarks"] = { loading: false, ready: false, failed: false };
+  firstRenderStartedSourceIds.clear();
 }
 
 self.addEventListener("message", (event: MessageEvent<WorkerInboundMessage>) => {
@@ -157,6 +179,19 @@ async function handleProcess(
     postError(jobId, "invalid_input", `Source bitmap has zero dimension: ${srcW}x${srcH}`);
     bitmap.close();
     return;
+  }
+
+  // U8 first-render lifecycle: the source-cached stages (rasterize,
+  // bilateral, face landmarks, segmentation) run end-to-end on the FIRST
+  // dispatch for a new sourceId. Subsequent dispatches with the same id
+  // hit the source cache and skip those stages. Emit `first-render-start`
+  // before any of them and `first-render-end` after they all complete so
+  // the FirstRenderSpinner overlay only appears for the perceptible-cost
+  // first render. The set is cleared on `__resetWorkerMLStateForTests`.
+  const isFirstRender = !firstRenderStartedSourceIds.has(sourceId);
+  if (isFirstRender) {
+    firstRenderStartedSourceIds.add(sourceId);
+    emitFirstRenderStart(sourceId);
   }
 
   // Step 1: rasterize the source bitmap onto a same-size canvas with a
@@ -288,6 +323,15 @@ async function handleProcess(
       // Fast (v3 path): naive corner-sample post-crop.
       sourceMask = buildMask(cropped, sampleBackgroundColor(cropped), silhouetteTolerance);
     }
+  }
+
+  // U8: all source-cached stages have completed (or hit the cache). Signal
+  // the spinner to hide. Paired with the `first-render-start` emit above —
+  // emitted exactly once per (worker lifetime, sourceId). The remaining
+  // pipeline stages (posterize, downscale, quantize, outline, chunky) are
+  // per-dispatch and considered fast enough not to warrant the spinner.
+  if (isFirstRender) {
+    emitFirstRenderEnd(sourceId);
   }
 
   // Step 3b: optional posterization (per-channel band reduction). Runs

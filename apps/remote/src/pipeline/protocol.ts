@@ -148,11 +148,40 @@ export interface MLErrorMessage {
   readonly code: MLErrorCode;
 }
 
+/**
+ * U8 first-render lifecycle messages.
+ *
+ * `first-render-start` fires at most once per (worker lifetime, sourceId)
+ * pair, BEFORE any source-cached stage (bilateral / segmentation / face
+ * landmarks / face boost) runs for that source. `first-render-end` fires
+ * after every source-cached stage has completed (whether it actually ran
+ * or hit a cache). The pair drives the FirstRenderSpinner overlay on the
+ * result pane; subsequent ProcessRequests for the same sourceId reuse
+ * the cache and emit no first-render-* messages, so the spinner only
+ * appears for the perceptible-cost first render of a new source.
+ *
+ * `sourceId` is included so the main thread can correlate the messages
+ * with the file they describe (today the hook just maps them onto a
+ * boolean, but the id keeps the protocol forward-compatible if the UI
+ * grows source-keyed UX later).
+ */
+export interface FirstRenderStartMessage {
+  readonly type: "first-render-start";
+  readonly sourceId: string;
+}
+
+export interface FirstRenderEndMessage {
+  readonly type: "first-render-end";
+  readonly sourceId: string;
+}
+
 export type WorkerOutboundMessage =
   | ProcessResult
   | WorkerErrorMessage
   | MLStatusMessage
-  | MLErrorMessage;
+  | MLErrorMessage
+  | FirstRenderStartMessage
+  | FirstRenderEndMessage;
 export type WorkerInboundMessage = ProcessRequest;
 
 // v3 extends to 8 stops — Asset filter needs 48, Environment needs 192.
@@ -195,4 +224,16 @@ export function isMLErrorMessage(msg: unknown): msg is MLErrorMessage {
   if (typeof msg !== "object" || msg === null) return false;
   const m = msg as Record<string, unknown>;
   return m.type === "ml-error" && typeof m.stage === "string" && typeof m.code === "string";
+}
+
+export function isFirstRenderStartMessage(msg: unknown): msg is FirstRenderStartMessage {
+  if (typeof msg !== "object" || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m.type === "first-render-start" && typeof m.sourceId === "string";
+}
+
+export function isFirstRenderEndMessage(msg: unknown): msg is FirstRenderEndMessage {
+  if (typeof msg !== "object" || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m.type === "first-render-end" && typeof m.sourceId === "string";
 }
