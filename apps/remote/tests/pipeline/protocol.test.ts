@@ -7,14 +7,18 @@ import {
 } from "../../src/pipeline/protocol";
 
 describe("protocol type guards", () => {
-  it("VALID_LONG_EDGES contains the 5 v1 stops", () => {
-    expect([...VALID_LONG_EDGES]).toEqual([16, 32, 64, 128, 256]);
+  it("VALID_LONG_EDGES contains the 8 v3 stops including v1's originals", () => {
+    expect([...VALID_LONG_EDGES]).toEqual([16, 32, 48, 64, 96, 128, 192, 256]);
+    // v1's original stops are still present for the R12 invariant.
+    for (const v1Stop of [16, 32, 64, 128, 256]) {
+      expect(VALID_LONG_EDGES).toContain(v1Stop as never);
+    }
   });
 
-  it("isValidLongEdge accepts the 5 stops and rejects everything else", () => {
+  it("isValidLongEdge accepts all 8 stops and rejects everything else", () => {
     for (const v of VALID_LONG_EDGES) expect(isValidLongEdge(v)).toBe(true);
     expect(isValidLongEdge(0)).toBe(false);
-    expect(isValidLongEdge(48)).toBe(false);
+    expect(isValidLongEdge(40)).toBe(false);
     expect(isValidLongEdge(-32)).toBe(false);
     expect(isValidLongEdge(Number.NaN)).toBe(false);
     expect(isValidLongEdge(Number.POSITIVE_INFINITY)).toBe(false);

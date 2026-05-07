@@ -131,8 +131,9 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
 
   // Step 5: quantize. Auto mode (no fixedPalette, no brandColors) is the
   // v1 path. Fixed-palette + brand-colors variations layer in via options.
+  // v3: paletteSize is now caller-controlled (default 16 preserves v2).
   const quantized = quantizePalette(outlined, {
-    paletteSize: DEFAULT_PALETTE_SIZE,
+    paletteSize: msg.paletteSize ?? DEFAULT_PALETTE_SIZE,
     fixedPalette: msg.fixedPalette,
     brandColors: msg.brandColors,
   });

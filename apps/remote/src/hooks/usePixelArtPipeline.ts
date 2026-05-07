@@ -58,6 +58,8 @@ export interface ProcessOptions {
   silhouetteTolerance?: number;
   /** v3 chunky pixel size (1-4). Undefined or 1 = no-op. */
   chunkSize?: number;
+  /** v3 palette size override. Undefined = 16 (v2 default). */
+  paletteSize?: number;
 }
 
 export interface UsePixelArtPipelineApi {
@@ -169,6 +171,7 @@ export function usePixelArtPipeline(
           silhouetteEnabled: queued.options.silhouetteEnabled,
           silhouetteTolerance: queued.options.silhouetteTolerance,
           chunkSize: queued.options.chunkSize,
+          paletteSize: queued.options.paletteSize,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

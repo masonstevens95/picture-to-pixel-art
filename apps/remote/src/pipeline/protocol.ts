@@ -48,6 +48,8 @@ export interface ProcessRequest {
   readonly silhouetteTolerance?: number;
   /** v3 chunky pixel size (1-4). Undefined or 1 = no-op. */
   readonly chunkSize?: number;
+  /** v3 palette size override. Undefined = v2 default of 16. */
+  readonly paletteSize?: number;
 }
 
 export interface ProcessResult {
@@ -74,7 +76,10 @@ export interface WorkerErrorMessage {
 export type WorkerOutboundMessage = ProcessResult | WorkerErrorMessage;
 export type WorkerInboundMessage = ProcessRequest;
 
-export const VALID_LONG_EDGES = [16, 32, 64, 128, 256] as const;
+// v3 extends to 8 stops — Asset filter needs 48, Environment needs 192.
+// Original v1/v2 stops {16, 32, 64, 128, 256} all preserved so the v2
+// invariant test still passes byte-identically for those values.
+export const VALID_LONG_EDGES = [16, 32, 48, 64, 96, 128, 192, 256] as const;
 export type ValidLongEdge = (typeof VALID_LONG_EDGES)[number];
 
 export function isValidLongEdge(value: number): value is ValidLongEdge {
