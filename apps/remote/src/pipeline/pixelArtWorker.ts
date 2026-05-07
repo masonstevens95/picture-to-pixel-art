@@ -7,6 +7,7 @@ import type {
 } from "./protocol";
 import { centerCrop } from "./crop";
 import { areaAverageDownscale } from "./downscale";
+import { applyOutline, DEFAULT_OUTLINE_COLOR } from "./outline";
 import { quantizePalette } from "./quantize";
 import { saturationAdjust } from "./saturation";
 
@@ -92,9 +93,18 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
   // Step 4: area-average downscale (pure JS, no canvas resize).
   const downscaled = areaAverageDownscale(cropped, width, height);
 
+  // Step 4b: optional outline overlay (Sobel + dilate + colored fill) at
+  // output resolution so 1px lines are crisp. Disabled short-circuits to
+  // identity inside applyOutline.
+  const outlined = applyOutline(downscaled, {
+    enabled: msg.outlineEnabled ?? false,
+    width: msg.outlineWidth ?? 1,
+    color: (msg.outlineColor as [number, number, number] | undefined) ?? DEFAULT_OUTLINE_COLOR,
+  });
+
   // Step 5: quantize. Auto mode (no fixedPalette, no brandColors) is the
   // v1 path. Fixed-palette + brand-colors variations layer in via options.
-  const quantized = quantizePalette(downscaled, {
+  const quantized = quantizePalette(outlined, {
     paletteSize: DEFAULT_PALETTE_SIZE,
     fixedPalette: msg.fixedPalette,
     brandColors: msg.brandColors,

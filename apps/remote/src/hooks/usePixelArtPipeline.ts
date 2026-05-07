@@ -47,6 +47,10 @@ export interface ProcessOptions {
   fixedPalette?: readonly (readonly [number, number, number])[];
   /** Additive brand-color anchors. */
   brandColors?: readonly (readonly [number, number, number])[];
+  /** v3 outline transform options. */
+  outlineEnabled?: boolean;
+  outlineWidth?: number;
+  outlineColor?: readonly [number, number, number];
 }
 
 export interface UsePixelArtPipelineApi {
@@ -151,6 +155,9 @@ export function usePixelArtPipeline(
           aspectRatio: queued.options.aspectRatio,
           fixedPalette: queued.options.fixedPalette,
           brandColors: queued.options.brandColors,
+          outlineEnabled: queued.options.outlineEnabled,
+          outlineWidth: queued.options.outlineWidth,
+          outlineColor: queued.options.outlineColor,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

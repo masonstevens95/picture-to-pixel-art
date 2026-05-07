@@ -3,6 +3,7 @@ import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
 import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRatioSelect";
 import BrandColorsTextarea from "../components/BrandColorsTextarea";
 import DropZone from "../components/DropZone";
+import OutlineControl, { type OutlineControlValue } from "../components/OutlineControl";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
@@ -39,6 +40,11 @@ export default function PixelArtApp() {
   const [customPaletteColors, setCustomPaletteColors] = useState<readonly RGB[] | null>(null);
   const [brandColorsText, setBrandColorsText] = useState<string>("");
   const [brandColors, setBrandColors] = useState<readonly RGB[] | null>(null);
+  const [outline, setOutline] = useState<OutlineControlValue>({
+    enabled: false,
+    width: 1,
+    color: [0, 0, 0],
+  });
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -90,6 +96,9 @@ export default function PixelArtApp() {
           aspectRatio,
           fixedPalette,
           brandColors: brandColors ?? undefined,
+          outlineEnabled: outline.enabled,
+          outlineWidth: outline.width,
+          outlineColor: outline.color,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -112,6 +121,7 @@ export default function PixelArtApp() {
     curatedPaletteId,
     customPaletteColors,
     brandColors,
+    outline,
     process,
   ]);
 
@@ -193,6 +203,7 @@ export default function PixelArtApp() {
           paletteOverridden={paletteMode !== "auto"}
           disabled={!hasImage}
         />
+        <OutlineControl value={outline} onChange={setOutline} disabled={!hasImage} />
       </AdvancedControlsPanel>
 
       <SideBySidePreview

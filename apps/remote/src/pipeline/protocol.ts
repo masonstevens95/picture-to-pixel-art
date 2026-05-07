@@ -35,6 +35,12 @@ export interface ProcessRequest {
    * palette.
    */
   readonly brandColors?: readonly (readonly [number, number, number])[];
+  /**
+   * v3 outline transform. Disabled / omitted reproduces v2 behavior.
+   */
+  readonly outlineEnabled?: boolean;
+  readonly outlineWidth?: number;
+  readonly outlineColor?: readonly [number, number, number];
 }
 
 export interface ProcessResult {
