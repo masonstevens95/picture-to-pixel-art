@@ -5,6 +5,7 @@ import type {
   WorkerErrorMessage,
   WorkerInboundMessage,
 } from "./protocol";
+import { bilateralFilter } from "./bilateral";
 import { centerCrop } from "./crop";
 import { areaAverageDownscale } from "./downscale";
 import { chunkify } from "./chunky";
@@ -68,11 +69,9 @@ async function handleProcess(
 
   // U2: take (or replace) the active source cache entry. New sourceId
   // evicts the previous entry; same sourceId returns the same reference
-  // so future units' cached values survive across requests for the same
-  // source. No consumers read or write the cache yet — U3/U5/U6 will.
-  // The result is intentionally unused for now; eslint silenced via a
-  // void cast at the call site below for clarity over `// eslint-disable`.
-  void cacheManager.getOrInit(sourceId);
+  // so source-cached stages (U3 bilateral, U5 segmentation, U6 landmarks)
+  // survive across requests for the same source.
+  const cache = cacheManager.getOrInit(sourceId);
 
   if (!Number.isFinite(targetLongEdge) || targetLongEdge <= 0) {
     postError(jobId, "invalid_input", `targetLongEdge must be positive, got ${targetLongEdge}`);
@@ -107,10 +106,27 @@ async function handleProcess(
 
   const sourceImageData = sourceCtx.getImageData(0, 0, srcW, srcH);
 
+  // Step 1a (U3): cartoon-smoothing bilateral filter, source-cached.
+  // 'off' (or undefined) short-circuits inside bilateralFilter to return
+  // the input ImageData by reference — v3-equivalent identity. Cached on
+  // the source-id so smoothness changes alone don't re-rasterize, and so
+  // downstream slider drags (saturation, outline, etc.) reuse the same
+  // smoothed source.
+  const smoothness = msg.smoothness ?? "off";
+  const smoothnessKey = "bilateral:" + smoothness;
+  let smoothed: ImageData;
+  if (cache.bilateralOutput && cache.smoothnessKey === smoothnessKey) {
+    smoothed = cache.bilateralOutput;
+  } else {
+    smoothed = bilateralFilter(sourceImageData, smoothness);
+    cache.bilateralOutput = smoothed;
+    cache.smoothnessKey = smoothnessKey;
+  }
+
   // Step 2: optional saturation adjustment (HSL). amount=0 short-circuits
   // inside saturationAdjust to return the input ImageData unchanged, so
   // v1 defaults produce v1-bit-identical output.
-  const adjusted = saturationAdjust(sourceImageData, msg.saturation ?? 0);
+  const adjusted = saturationAdjust(smoothed, msg.saturation ?? 0);
 
   // Step 3: optional aspect-ratio center crop. Undefined ratio preserves
   // source dims (v1 default).

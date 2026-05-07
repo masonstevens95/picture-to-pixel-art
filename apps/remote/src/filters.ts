@@ -160,8 +160,15 @@ export function dialsMatchPreset(
     silhouetteEnabled: boolean;
     silhouetteTolerance: number;
     chunkSize: number;
+    /**
+     * v4 smoothness. Optional here so callers that haven't been updated to
+     * pass it (and presets that don't yet declare it) still match. U7
+     * lifts smoothness onto FilterPreset proper; until then a missing
+     * preset.smoothness is treated as 'off'.
+     */
+    smoothness?: "off" | "low" | "medium" | "high";
   },
-  preset: FilterPreset,
+  preset: FilterPreset & { smoothness?: "off" | "low" | "medium" | "high" },
 ): boolean {
   if (dials.resolution !== preset.resolution) return false;
   if (Math.abs(dials.saturation - preset.saturation) > FLOAT_EPS) return false;
@@ -189,5 +196,11 @@ export function dialsMatchPreset(
     return false;
   }
   if (dials.chunkSize !== preset.chunkSize) return false;
+  // v4 smoothness comparison. Both sides default to 'off' when undefined,
+  // which is the v3-equivalent identity path. This means any v3 preset
+  // (which has no smoothness field declared yet) still matches dials with
+  // smoothness='off' — preserving the existing "Custom" detection
+  // semantics — and any non-'off' dial setting flips to Custom.
+  if ((dials.smoothness ?? "off") !== (preset.smoothness ?? "off")) return false;
   return true;
 }

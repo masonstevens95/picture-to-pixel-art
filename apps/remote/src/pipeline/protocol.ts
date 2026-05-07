@@ -58,6 +58,12 @@ export interface ProcessRequest {
   readonly chunkSize?: number;
   /** v3 palette size override. Undefined = v2 default of 16. */
   readonly paletteSize?: number;
+  /**
+   * v4 cartoon-smoothing strength. Undefined or 'off' is the v3-equivalent
+   * no-op path (bilateral stage short-circuits to identity). The worker
+   * source-cache keys its bilateral output on this value.
+   */
+  readonly smoothness?: "off" | "low" | "medium" | "high";
 }
 
 export interface ProcessResult {

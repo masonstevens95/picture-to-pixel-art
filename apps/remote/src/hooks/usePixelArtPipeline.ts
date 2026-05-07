@@ -67,6 +67,12 @@ export interface ProcessOptions {
   chunkSize?: number;
   /** v3 palette size override. Undefined = 16 (v2 default). */
   paletteSize?: number;
+  /**
+   * v4 cartoon-smoothing strength. Undefined = 'off' = identity (R12).
+   * Forwarded as ProcessRequest.smoothness; the worker's source cache keys
+   * its bilateral output on this value.
+   */
+  smoothness?: "off" | "low" | "medium" | "high";
 }
 
 export interface UsePixelArtPipelineApi {
@@ -180,6 +186,7 @@ export function usePixelArtPipeline(
           silhouetteTolerance: queued.options.silhouetteTolerance,
           chunkSize: queued.options.chunkSize,
           paletteSize: queued.options.paletteSize,
+          smoothness: queued.options.smoothness,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

@@ -15,8 +15,10 @@ import SilhouetteControl, {
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
+import SmoothnessControl from "../components/SmoothnessControl";
 import StyleSelector, { type StyleSelectorValue } from "../components/StyleSelector";
 import { usePixelArtPipeline } from "../hooks/usePixelArtPipeline";
+import type { SmoothnessLevel } from "../pipeline/bilateral";
 import { downloadResultAsPng } from "../pipeline/exportPng";
 import { CURATED_PALETTES, type CuratedPaletteId, type RGB } from "../pipeline/palettes";
 import type { ValidLongEdge } from "../pipeline/protocol";
@@ -67,6 +69,10 @@ export default function PixelArtApp() {
   );
   const [chunkSize, setChunkSize] = useState(1);
   const [paletteSize, setPaletteSize] = useState(16);
+  // v4 cartoon-smoothing. Default 'off' is the R12 identity path; the
+  // worker bilateral stage short-circuits and the source cache stores the
+  // input by reference.
+  const [smoothness, setSmoothness] = useState<SmoothnessLevel>("off");
   // v3 Style state: which filter (if any) the dial state currently matches.
   // 'custom' alone means user is on Custom intentionally; 'custom' with
   // wasFilter set means they drifted from a previously-applied filter.
@@ -137,6 +143,7 @@ export default function PixelArtApp() {
           silhouetteTolerance,
           chunkSize,
           paletteSize,
+          smoothness,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -166,6 +173,7 @@ export default function PixelArtApp() {
     silhouetteTolerance,
     chunkSize,
     paletteSize,
+    smoothness,
     process,
   ]);
 
@@ -254,6 +262,7 @@ export default function PixelArtApp() {
         silhouetteEnabled,
         silhouetteTolerance,
         chunkSize,
+        smoothness,
       },
       preset,
     );
@@ -274,6 +283,7 @@ export default function PixelArtApp() {
     silhouetteEnabled,
     silhouetteTolerance,
     chunkSize,
+    smoothness,
   ]);
 
   const handleExport = useCallback(() => {
@@ -360,6 +370,7 @@ export default function PixelArtApp() {
           onChange={setPaletteSize}
           disabled={!hasImage}
         />
+        <SmoothnessControl value={smoothness} onChange={setSmoothness} disabled={!hasImage} />
       </AdvancedControlsPanel>
 
       <SideBySidePreview
