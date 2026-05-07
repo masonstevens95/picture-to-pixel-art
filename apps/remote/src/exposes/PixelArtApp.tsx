@@ -9,6 +9,7 @@ import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeC
 import ChunkyPixelsControl from "../components/ChunkyPixelsControl";
 import PaletteSizeControl from "../components/PaletteSizeControl";
 import PosterizationControl from "../components/PosterizationControl";
+import FaceBoostToggle from "../components/FaceBoostToggle";
 import SilhouetteControl, {
   DEFAULT_SILHOUETTE_TOLERANCE,
   type SilhouetteQuality,
@@ -78,6 +79,11 @@ export default function PixelArtApp() {
   // worker bilateral stage short-circuits and the source cache stores the
   // input by reference.
   const [smoothness, setSmoothness] = useState<SmoothnessLevel>("off");
+  // v4 face-aware contrast boost (U6). Default false is the R12 baseline:
+  // the worker MUST skip MediaPipe `detectLandmarks` entirely when this is
+  // false (no `.task` fetch, no `import('@mediapipe/tasks-vision')`).
+  // U7 sets this to `true` for the Portrait filter.
+  const [faceAwareEnabled, setFaceAwareEnabled] = useState<boolean>(false);
   // v3 Style state: which filter (if any) the dial state currently matches.
   // 'custom' alone means user is on Custom intentionally; 'custom' with
   // wasFilter set means they drifted from a previously-applied filter.
@@ -150,6 +156,7 @@ export default function PixelArtApp() {
           chunkSize,
           paletteSize,
           smoothness,
+          faceAwareEnabled,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -181,6 +188,7 @@ export default function PixelArtApp() {
     chunkSize,
     paletteSize,
     smoothness,
+    faceAwareEnabled,
     process,
   ]);
 
@@ -381,6 +389,12 @@ export default function PixelArtApp() {
           disabled={!hasImage}
         />
         <SmoothnessControl value={smoothness} onChange={setSmoothness} disabled={!hasImage} />
+        <FaceBoostToggle
+          enabled={faceAwareEnabled}
+          onChange={setFaceAwareEnabled}
+          mlAvailable={state.mlStatus["face-landmarks"] !== "failed"}
+          disabled={!hasImage}
+        />
       </AdvancedControlsPanel>
 
       <SideBySidePreview

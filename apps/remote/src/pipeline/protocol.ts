@@ -73,6 +73,15 @@ export interface ProcessRequest {
    * (`silhouetteEnabled=false` default) never triggers a model load.
    */
   readonly silhouetteQuality?: "fast" | "smart";
+  /**
+   * v4 face-aware contrast boost gate (U6). When `true`, the worker runs
+   * MediaPipe face landmarks (lazy-loaded on first hit) and applies the
+   * U6 face-boost stage at landmark positions. When `false` or absent,
+   * the worker MUST skip detection entirely — no MediaPipe `.task` load,
+   * no fileset fetch. Absence is the R12 invariant baseline; the Custom
+   * filter and v3-byte-identical configurations leave this unset.
+   */
+  readonly faceAwareEnabled?: boolean;
 }
 
 export interface ProcessResult {

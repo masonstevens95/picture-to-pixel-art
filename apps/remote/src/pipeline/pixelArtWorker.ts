@@ -12,6 +12,7 @@ import { bilateralFilter } from "./bilateral";
 import { centerCrop } from "./crop";
 import { areaAverageDownscale } from "./downscale";
 import { chunkify } from "./chunky";
+import { applyFaceBoost } from "./faceBoost";
 import { applyOutline, DEFAULT_OUTLINE_COLOR } from "./outline";
 import { posterize } from "./posterize";
 import { quantizePalette } from "./quantize";
@@ -24,6 +25,7 @@ import {
   sampleBackgroundColor,
 } from "./silhouette";
 import { SourceCacheManager } from "./sourceCache";
+import { runAndCacheLandmarks } from "../ml/faceLandmarks";
 import { runAndCacheSegmentation } from "../ml/segmentation";
 import { MLRuntimeError, type MLRuntimeErrorCode } from "../ml/types";
 
@@ -190,10 +192,45 @@ async function handleProcess(
     cache.smoothnessKey = smoothnessKey;
   }
 
+  // Step 1b (U6): face landmarks + landmark-aware contrast boost, source-cached.
+  //
+  // R12 GATE (load-bearing): when `faceAwareEnabled !== true` we skip the
+  // detector entirely. No `import('@mediapipe/tasks-vision')`, no
+  // `.task` fetch, no fileset download. Without this gate the ~3-4 MB
+  // MediaPipe bundle would lazy-load on every R12-default dispatch on a
+  // new source-id, violating both R12 (byte-identical default output)
+  // and R6 (lazy load only on cartoon-feature use).
+  //
+  // The detector is invoked at most once per source-id: `landmarksAttempted`
+  // gates re-runs. After detection (success OR no-face-detected), the
+  // result is cached and applyFaceBoost short-circuits naturally on null.
+  const faceAwareEnabled = msg.faceAwareEnabled === true;
+  if (faceAwareEnabled && !cache.landmarksAttempted) {
+    emitMLStatus("face-landmarks", "loading");
+    try {
+      await runAndCacheLandmarks(smoothed, sourceId, cacheManager);
+      emitMLStatus("face-landmarks", "ready");
+    } catch (err) {
+      emitMLStatus("face-landmarks", "failed");
+      emitMLError("face-landmarks", toMLErrorCode(err));
+      // Mark attempted on the active cache so we don't re-fail on every
+      // dispatch. runAndCacheLandmarks doesn't reach the cache write on
+      // throw, so do it explicitly here.
+      const active = cacheManager.get(sourceId);
+      if (active) {
+        active.landmarks = null;
+        active.landmarksAttempted = true;
+      }
+    }
+  }
+  // Apply boost. Identity (returns input by reference) when faceAwareEnabled=false
+  // OR cache.landmarks=null (no face detected, or detection skipped, or it failed).
+  const boosted = applyFaceBoost(smoothed, cache.landmarks, faceAwareEnabled);
+
   // Step 2: optional saturation adjustment (HSL). amount=0 short-circuits
   // inside saturationAdjust to return the input ImageData unchanged, so
   // v1 defaults produce v1-bit-identical output.
-  const adjusted = saturationAdjust(smoothed, msg.saturation ?? 0);
+  const adjusted = saturationAdjust(boosted, msg.saturation ?? 0);
 
   // Step 3: optional aspect-ratio center crop. Undefined ratio preserves
   // source dims (v1 default).

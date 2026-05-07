@@ -100,6 +100,14 @@ export interface ProcessOptions {
    * outbound message that the hook reflects in `state.mlError`.
    */
   silhouetteQuality?: "fast" | "smart";
+  /**
+   * v4 face-aware contrast boost gate (U6). Undefined / false = R12
+   * baseline; the worker MUST skip MediaPipe Face Landmarker detection
+   * entirely (no model load on the default path). True triggers the
+   * U6 detect + boost stage; failures emit an `ml-error` outbound and
+   * fall back to identity (no boost applied).
+   */
+  faceAwareEnabled?: boolean;
 }
 
 export interface UsePixelArtPipelineApi {
@@ -235,6 +243,7 @@ export function usePixelArtPipeline(
           paletteSize: queued.options.paletteSize,
           smoothness: queued.options.smoothness,
           silhouetteQuality: queued.options.silhouetteQuality,
+          faceAwareEnabled: queued.options.faceAwareEnabled,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

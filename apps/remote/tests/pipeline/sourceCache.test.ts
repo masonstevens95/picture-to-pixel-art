@@ -21,6 +21,21 @@ describe("SourceCacheManager", () => {
     expect(cache.bilateralOutput).toBeNull();
     expect(cache.segmentationMask).toBeNull();
     expect(cache.landmarks).toBeNull();
+    // U6: a fresh entry has never attempted face-landmark detection. The
+    // worker keys re-detection on `(faceAwareEnabled && !landmarksAttempted)`,
+    // so a freshly-evicted source must default to false.
+    expect(cache.landmarksAttempted).toBe(false);
+  });
+
+  it("returning to a previously-active id after eviction resets landmarksAttempted to false", () => {
+    const mgr = new SourceCacheManager();
+    const a1 = mgr.getOrInit("A");
+    a1.landmarksAttempted = true;
+    a1.landmarks = [{ x: 0.5, y: 0.5, z: 0, visibility: 1 }];
+    mgr.getOrInit("B");
+    const a2 = mgr.getOrInit("A");
+    expect(a2.landmarksAttempted).toBe(false);
+    expect(a2.landmarks).toBeNull();
   });
 
   it("getOrInit returns the same reference for repeated calls with the same sourceId", () => {

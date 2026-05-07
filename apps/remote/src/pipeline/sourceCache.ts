@@ -27,16 +27,16 @@
  */
 
 /**
- * Placeholder for `NormalizedLandmark` from `@mediapipe/tasks-vision`.
+ * Type-only import: doesn't generate a runtime require, so the heavy
+ * `@mediapipe/tasks-vision` bundle stays out of the worker until U6's
+ * face-landmark stage actually fires (lazy `import()` in `faceLandmarks.ts`).
  *
- * U6 will replace this with a direct import from `@mediapipe/tasks-vision`.
- * Kept structurally compatible so the swap is a one-line change.
+ * Re-exported below so consumers (`faceBoost.ts`, `faceLandmarks.ts`) can
+ * pull the canonical type from one place.
  */
-export interface NormalizedLandmark {
-  x: number;
-  y: number;
-  z?: number;
-}
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+
+export type { NormalizedLandmark };
 
 export interface SourceCache {
   /**
@@ -51,8 +51,22 @@ export interface SourceCache {
   bilateralOutput: ImageData | null;
   /** U5 writes the binary background mask. Null until U5 runs. */
   segmentationMask: ImageData | null;
-  /** U6 writes the face-landmark array. Null until U6 runs (or no face). */
+  /**
+   * U6 writes the face-landmark array. Null in two cases:
+   *   - never attempted (gated by `landmarksAttempted=false`), or
+   *   - attempted but no face detected (then `landmarksAttempted=true`).
+   *
+   * The pair `(landmarks, landmarksAttempted)` distinguishes "never ran"
+   * from "ran, no face" so the worker R12 gate doesn't redundantly invoke
+   * MediaPipe on every dispatch for a faceless source.
+   */
   landmarks: NormalizedLandmark[] | null;
+  /**
+   * Sentinel: has the face-landmark detector been invoked for this source
+   * yet? Set to `true` after a single attempt regardless of outcome. The
+   * worker keys re-detection on `(faceAwareEnabled === true) && !landmarksAttempted`.
+   */
+  landmarksAttempted: boolean;
 }
 
 function emptyCache(): SourceCache {
@@ -61,6 +75,7 @@ function emptyCache(): SourceCache {
     bilateralOutput: null,
     segmentationMask: null,
     landmarks: null,
+    landmarksAttempted: false,
   };
 }
 

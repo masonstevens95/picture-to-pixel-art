@@ -12,6 +12,7 @@
     "verify": "./scripts/verify-build.sh"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.18",
     "image-q": "~4.0.0",
     "onnxruntime-web": "^1.19.0",
     "react": "^18.3.1",
