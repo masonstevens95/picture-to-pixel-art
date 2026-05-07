@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { bilateralFilter } from "../../src/pipeline/bilateral";
 import { centerCrop } from "../../src/pipeline/crop";
 import { chunkify } from "../../src/pipeline/chunky";
 import { areaAverageDownscale } from "../../src/pipeline/downscale";
+import { applyFaceBoost } from "../../src/pipeline/faceBoost";
 import { applyOutline } from "../../src/pipeline/outline";
 import { posterize } from "../../src/pipeline/posterize";
 import { quantizePalette } from "../../src/pipeline/quantize";
 import { saturationAdjust } from "../../src/pipeline/saturation";
+import type { NormalizedLandmark } from "../../src/pipeline/sourceCache";
 
 /**
  * R5 invariant: with every v2 control at its default (Source aspect,
@@ -78,6 +81,51 @@ function v3DefaultPipeline(source: ImageData, targetLongEdge: number): ImageData
   const quantized = quantizePalette(outlined, { paletteSize: 16 });
   // No silhouette (no mask to apply).
   return chunkify(quantized, 1); // chunkSize=1 short-circuits
+}
+
+/**
+ * v4 pipeline at all defaults — every new stage's identity short-circuit
+ * fires. v4's pipeline order (vs v3): bilateral + faceBoost are NEW
+ * source-cached stages; outline moves from pre-quantize to post-quantize.
+ *
+ *   bilateral('off')        → identity
+ *   faceBoost(null, false)  → identity
+ *   saturation(0)           → identity (v3-equivalent)
+ *   crop(undefined)         → identity (v3-equivalent)
+ *   posterize(undefined)    → identity (v3-equivalent)
+ *   downscale → quantize    (v3-equivalent)
+ *   applyOutline(disabled)  → identity (now post-quantize, but disabled is identity)
+ *   silhouette mask         → not applied (silhouetteEnabled=false)
+ *   chunkify(1)             → identity (v3-equivalent)
+ *
+ * Result is byte-equal to v1's reference pipeline.
+ */
+function v4DefaultPipeline(source: ImageData, targetLongEdge: number): ImageData {
+  const smoothed = bilateralFilter(source, "off"); // smoothness=off short-circuits
+  const boosted = applyFaceBoost(smoothed, null, false); // disabled or null landmarks short-circuits
+  const adjusted = saturationAdjust(boosted, 0); // saturation=0 short-circuits
+  const cropped = adjusted; // aspectRatio undefined → no crop
+  const posterized = posterize(cropped, undefined); // bands=undefined short-circuits
+  const longEdge = Math.max(posterized.width, posterized.height);
+  const scale = targetLongEdge >= longEdge ? 1 : targetLongEdge / longEdge;
+  const targetW = Math.max(1, Math.round(posterized.width * scale));
+  const targetH = Math.max(1, Math.round(posterized.height * scale));
+  const downscaled = areaAverageDownscale(posterized, targetW, targetH);
+  const quantized = quantizePalette(downscaled, { paletteSize: 16 });
+  const outlined = applyOutline(quantized, { enabled: false, width: 1, color: [0, 0, 0] }); // post-quantize in v4
+  // No silhouette (silhouetteEnabled=false default).
+  return chunkify(outlined, 1); // chunkSize=1 short-circuits
+}
+
+/** Synthetic 478-point landmark array for negative-control tests. Real
+ * MediaPipe output would have meaningful coords; for testing we just need
+ * any non-null landmark set so faceBoost actually fires. */
+function syntheticLandmarks(): NormalizedLandmark[] {
+  const out: NormalizedLandmark[] = [];
+  for (let i = 0; i < 478; i++) {
+    out.push({ x: 0.5, y: 0.5, z: 0, visibility: 1 });
+  }
+  return out;
 }
 
 describe("v1-default invariant (R5)", () => {
@@ -174,5 +222,64 @@ describe("v3-default invariant (R12)", () => {
       }
     }
     expect(diff).toBe(true);
+  });
+});
+
+describe("v4-default invariant (R12)", () => {
+  it("v4 with all v4 controls at default produces byte-identical output to v1 (64x48 fixture)", () => {
+    const source = makeFixture(64, 48);
+    const v1 = v1Pipeline(source, 32);
+    const v4 = v4DefaultPipeline(source, 32);
+    expect(v4.width).toBe(v1.width);
+    expect(v4.height).toBe(v1.height);
+    expect(Array.from(v4.data)).toEqual(Array.from(v1.data));
+  });
+
+  it("v4 defaults match v1 for a 100x100 fixture at long-edge 64", () => {
+    const source = makeFixture(100, 100, 99);
+    const v1 = v1Pipeline(source, 64);
+    const v4 = v4DefaultPipeline(source, 64);
+    expect(Array.from(v4.data)).toEqual(Array.from(v1.data));
+  });
+
+  it("negative control: smoothness=high alone produces output that is NOT byte-equal to v1", () => {
+    const source = makeFixture(64, 48);
+    const v1 = v1Pipeline(source, 32);
+    const smoothed = bilateralFilter(source, "high");
+    const downscaled = areaAverageDownscale(smoothed, 32, 24);
+    const v4Smoothed = quantizePalette(downscaled, { paletteSize: 16 });
+    let diff = false;
+    for (let i = 0; i < v1.data.length; i++) {
+      if (v1.data[i] !== v4Smoothed.data[i]) {
+        diff = true;
+        break;
+      }
+    }
+    expect(diff).toBe(true);
+  });
+
+  it("negative control: faceAwareEnabled=true with non-null landmarks produces output that is NOT byte-equal to v1", () => {
+    const source = makeFixture(64, 48);
+    const v1 = v1Pipeline(source, 32);
+    const boosted = applyFaceBoost(source, syntheticLandmarks(), true);
+    const downscaled = areaAverageDownscale(boosted, 32, 24);
+    const v4Boosted = quantizePalette(downscaled, { paletteSize: 16 });
+    let diff = false;
+    for (let i = 0; i < v1.data.length; i++) {
+      if (v1.data[i] !== v4Boosted.data[i]) {
+        diff = true;
+        break;
+      }
+    }
+    expect(diff).toBe(true);
+  });
+
+  it("v4 default pipeline returns input reference for bilateral and faceBoost short-circuits", () => {
+    // Direct verification that the new v4 stages preserve identity by reference at default.
+    const source = makeFixture(32, 32);
+    expect(bilateralFilter(source, "off")).toBe(source);
+    expect(applyFaceBoost(source, null, false)).toBe(source);
+    expect(applyFaceBoost(source, syntheticLandmarks(), false)).toBe(source);
+    expect(applyFaceBoost(source, null, true)).toBe(source);
   });
 });
