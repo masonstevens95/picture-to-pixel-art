@@ -238,6 +238,11 @@ export default function PixelArtApp() {
     setSilhouetteEnabled(p.silhouetteEnabled);
     setSilhouetteTolerance(p.silhouetteTolerance);
     setChunkSize(p.chunkSize);
+    // v4 dials (U7). React 18 batches all setState calls within an event
+    // handler so these land in the same render as the v3 dials above.
+    setSmoothness(p.smoothness);
+    setFaceAwareEnabled(p.faceAwareEnabled);
+    setSilhouetteQuality(p.silhouetteQuality);
     setActiveStyle(id);
     setWasFilter(null);
   }, []);
@@ -278,6 +283,8 @@ export default function PixelArtApp() {
         silhouetteTolerance,
         chunkSize,
         smoothness,
+        faceAwareEnabled,
+        silhouetteQuality,
       },
       preset,
     );
@@ -299,6 +306,8 @@ export default function PixelArtApp() {
     silhouetteTolerance,
     chunkSize,
     smoothness,
+    faceAwareEnabled,
+    silhouetteQuality,
   ]);
 
   const handleExport = useCallback(() => {

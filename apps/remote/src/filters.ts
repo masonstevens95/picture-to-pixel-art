@@ -12,6 +12,8 @@
 import type { ValidLongEdge } from "./pipeline/protocol";
 import type { CuratedPaletteId, RGB } from "./pipeline/palettes";
 import type { PaletteMode } from "./components/PaletteModeControl";
+import type { SilhouetteQuality } from "./components/SilhouetteControl";
+import type { SmoothnessLevel } from "./pipeline/bilateral";
 
 export const FILTER_IDS = [
   "art-piece",
@@ -41,6 +43,29 @@ export interface FilterPreset {
   silhouetteEnabled: boolean;
   silhouetteTolerance: number;
   chunkSize: number;
+  /**
+   * v4 cartoon-smoothing level (U3). 'off' is the R12 invariant baseline:
+   * the worker bilateral stage short-circuits and the source cache stores
+   * the input by reference. Painterly filters (Art piece, Environment)
+   * keep 'off'; the cartoon filters (Portrait, Units) use 'medium', and
+   * Asset uses 'low'.
+   */
+  smoothness: SmoothnessLevel;
+  /**
+   * v4 face-aware contrast boost (U6). Default false is the R12 baseline:
+   * the worker MUST skip MediaPipe `detectLandmarks` entirely when this is
+   * false. U7 enables this only for the Portrait filter where eye/mouth/
+   * nose visibility matters at low resolutions.
+   */
+  faceAwareEnabled: boolean;
+  /**
+   * v4 silhouette quality (U5). 'fast' is the R12 invariant baseline (the
+   * existing chroma-key path). 'smart' opts into ML segmentation. Asset is
+   * the only v4 filter where the user-visible default is 'smart'. Recorded
+   * on every preset so the dial-match comparison flips to "modified" when
+   * the user changes only this value.
+   */
+  silhouetteQuality: SilhouetteQuality;
 }
 
 const BLACK: RGB = [0, 0, 0];
@@ -62,11 +87,18 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     silhouetteEnabled: false,
     silhouetteTolerance: 12,
     chunkSize: 1,
+    // Painterly preset — no smoothing, no face boost, fast silhouette.
+    // v3 values preserved exactly; only additive v4 fields appended.
+    smoothness: "off",
+    faceAwareEnabled: false,
+    silhouetteQuality: "fast",
   },
   portrait: {
     id: "portrait",
     name: "Portrait",
-    resolution: 128,
+    // v4: raised from 128 → 192 long edge so face features (eyes / mouth /
+    // nose) survive quantization. 192 is in VALID_LONG_EDGES.
+    resolution: 192,
     saturation: 0.1,
     aspectRatio: undefined,
     paletteMode: "auto",
@@ -79,6 +111,10 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     silhouetteEnabled: false,
     silhouetteTolerance: 12,
     chunkSize: 1,
+    // v4: cartoon smoothing + face-aware boost.
+    smoothness: "medium",
+    faceAwareEnabled: true,
+    silhouetteQuality: "fast",
   },
   units: {
     id: "units",
@@ -96,6 +132,10 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     silhouetteEnabled: false,
     silhouetteTolerance: 12,
     chunkSize: 2,
+    // v4: cartoon smoothing for unit sprites; no face boost; fast silhouette.
+    smoothness: "medium",
+    faceAwareEnabled: false,
+    silhouetteQuality: "fast",
   },
   asset: {
     id: "asset",
@@ -113,6 +153,10 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     silhouetteEnabled: true,
     silhouetteTolerance: 12,
     chunkSize: 1,
+    // v4: light smoothing + ML segmentation default for clean cutouts.
+    smoothness: "low",
+    faceAwareEnabled: false,
+    silhouetteQuality: "smart",
   },
   environment: {
     id: "environment",
@@ -130,6 +174,10 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     silhouetteEnabled: false,
     silhouetteTolerance: 12,
     chunkSize: 1,
+    // Painterly preset — preserves gradient; no smoothing.
+    smoothness: "off",
+    faceAwareEnabled: false,
+    silhouetteQuality: "fast",
   },
 };
 
@@ -160,15 +208,11 @@ export function dialsMatchPreset(
     silhouetteEnabled: boolean;
     silhouetteTolerance: number;
     chunkSize: number;
-    /**
-     * v4 smoothness. Optional here so callers that haven't been updated to
-     * pass it (and presets that don't yet declare it) still match. U7
-     * lifts smoothness onto FilterPreset proper; until then a missing
-     * preset.smoothness is treated as 'off'.
-     */
-    smoothness?: "off" | "low" | "medium" | "high";
+    smoothness: SmoothnessLevel;
+    faceAwareEnabled: boolean;
+    silhouetteQuality: SilhouetteQuality;
   },
-  preset: FilterPreset & { smoothness?: "off" | "low" | "medium" | "high" },
+  preset: FilterPreset,
 ): boolean {
   if (dials.resolution !== preset.resolution) return false;
   if (Math.abs(dials.saturation - preset.saturation) > FLOAT_EPS) return false;
@@ -196,11 +240,14 @@ export function dialsMatchPreset(
     return false;
   }
   if (dials.chunkSize !== preset.chunkSize) return false;
-  // v4 smoothness comparison. Both sides default to 'off' when undefined,
-  // which is the v3-equivalent identity path. This means any v3 preset
-  // (which has no smoothness field declared yet) still matches dials with
-  // smoothness='off' — preserving the existing "Custom" detection
-  // semantics — and any non-'off' dial setting flips to Custom.
-  if ((dials.smoothness ?? "off") !== (preset.smoothness ?? "off")) return false;
+  // v4 smoothness: string equality. Any drift from preset flips to "Custom".
+  if (dials.smoothness !== preset.smoothness) return false;
+  // v4 face-aware: strict boolean equality. Toggling face-boost on/off
+  // away from the preset's value flips to "Custom".
+  if (dials.faceAwareEnabled !== preset.faceAwareEnabled) return false;
+  // v4 silhouette quality: string equality. Recorded on every preset so a
+  // user changing only Quality (Fast ↔ Smart) marks the style "modified",
+  // even when silhouetteEnabled itself is false.
+  if (dials.silhouetteQuality !== preset.silhouetteQuality) return false;
   return true;
 }
