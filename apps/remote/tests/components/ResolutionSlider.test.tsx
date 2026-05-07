@@ -18,7 +18,8 @@ describe("ResolutionSlider", () => {
     const onChange = vi.fn();
     render(<ResolutionSlider value={32} onChange={onChange} />);
     const slider = screen.getByRole("slider");
-    fireEvent.change(slider, { target: { value: "3" } }); // index 3 -> 128
+    // v3 indexing: [16, 32, 48, 64, 96, 128, 192, 256] — index 5 → 128.
+    fireEvent.change(slider, { target: { value: "5" } });
     expect(onChange).toHaveBeenCalledWith(128);
   });
 

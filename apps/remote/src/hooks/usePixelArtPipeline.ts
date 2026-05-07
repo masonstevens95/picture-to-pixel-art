@@ -47,6 +47,19 @@ export interface ProcessOptions {
   fixedPalette?: readonly (readonly [number, number, number])[];
   /** Additive brand-color anchors. */
   brandColors?: readonly (readonly [number, number, number])[];
+  /** v3 outline transform options. */
+  outlineEnabled?: boolean;
+  outlineWidth?: number;
+  outlineColor?: readonly [number, number, number];
+  /** v3 posterization bands (2-8). Undefined = off. */
+  posterizeBands?: number;
+  /** v3 silhouette options. */
+  silhouetteEnabled?: boolean;
+  silhouetteTolerance?: number;
+  /** v3 chunky pixel size (1-4). Undefined or 1 = no-op. */
+  chunkSize?: number;
+  /** v3 palette size override. Undefined = 16 (v2 default). */
+  paletteSize?: number;
 }
 
 export interface UsePixelArtPipelineApi {
@@ -151,6 +164,14 @@ export function usePixelArtPipeline(
           aspectRatio: queued.options.aspectRatio,
           fixedPalette: queued.options.fixedPalette,
           brandColors: queued.options.brandColors,
+          outlineEnabled: queued.options.outlineEnabled,
+          outlineWidth: queued.options.outlineWidth,
+          outlineColor: queued.options.outlineColor,
+          posterizeBands: queued.options.posterizeBands,
+          silhouetteEnabled: queued.options.silhouetteEnabled,
+          silhouetteTolerance: queued.options.silhouetteTolerance,
+          chunkSize: queued.options.chunkSize,
+          paletteSize: queued.options.paletteSize,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

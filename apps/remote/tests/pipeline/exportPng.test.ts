@@ -7,6 +7,17 @@ describe("pngFilename", () => {
     expect(pngFilename(256, 256)).toBe("pixel-art-256x256.png");
     expect(pngFilename(16, 12)).toBe("pixel-art-16x12.png");
   });
+
+  it("v2 naming preserved when style is undefined or 'custom'", () => {
+    expect(pngFilename(64, 64)).toBe("pixel-art-64x64.png");
+    expect(pngFilename(64, 64, "custom")).toBe("pixel-art-64x64.png");
+  });
+
+  it("includes Style for non-Custom (Covers AE6)", () => {
+    expect(pngFilename(192, 144, "environment")).toBe("pixel-art-environment-192x144.png");
+    expect(pngFilename(48, 48, "asset")).toBe("pixel-art-asset-48x48.png");
+    expect(pngFilename(256, 256, "art-piece")).toBe("pixel-art-art-piece-256x256.png");
+  });
 });
 
 describe("triggerDownload", () => {

@@ -7,8 +7,18 @@ import type {
 } from "./protocol";
 import { centerCrop } from "./crop";
 import { areaAverageDownscale } from "./downscale";
+import { chunkify } from "./chunky";
+import { applyOutline, DEFAULT_OUTLINE_COLOR } from "./outline";
+import { posterize } from "./posterize";
 import { quantizePalette } from "./quantize";
 import { saturationAdjust } from "./saturation";
+import {
+  applyMask,
+  buildMask,
+  DEFAULT_SILHOUETTE_TOLERANCE,
+  downscaleMask,
+  sampleBackgroundColor,
+} from "./silhouette";
 
 /**
  * Worker entrypoint.
@@ -86,28 +96,64 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
   const cropped =
     msg.aspectRatio !== undefined ? centerCrop(adjusted, msg.aspectRatio) : adjusted;
 
+  // Step 3a: optional silhouette mask — sample corners of the CROPPED image
+  // (per v3 plan post-crop fix) so the mask coordinates align with what the
+  // user will see. Built at cropped dims; downscaled alongside the main image.
+  const silhouetteEnabled = msg.silhouetteEnabled === true;
+  const silhouetteTolerance = msg.silhouetteTolerance ?? DEFAULT_SILHOUETTE_TOLERANCE;
+  const sourceMask = silhouetteEnabled
+    ? buildMask(cropped, sampleBackgroundColor(cropped), silhouetteTolerance)
+    : null;
+
+  // Step 3b: optional posterization (per-channel band reduction). Runs
+  // before downscale so bands survive area-averaging. Identity when
+  // bands=undefined (R12 invariant).
+  const posterized = posterize(cropped, msg.posterizeBands);
+
   // Now compute target dimensions from the (possibly cropped) image.
-  const { width, height } = computeTargetDims(cropped.width, cropped.height, targetLongEdge);
+  const { width, height } = computeTargetDims(posterized.width, posterized.height, targetLongEdge);
 
   // Step 4: area-average downscale (pure JS, no canvas resize).
-  const downscaled = areaAverageDownscale(cropped, width, height);
+  const downscaled = areaAverageDownscale(posterized, width, height);
+
+  // Step 4a: downscale the silhouette mask alongside the image (nearest-
+  // neighbor preserves binary semantics).
+  const downscaledMask = sourceMask ? downscaleMask(sourceMask, width, height) : null;
+
+  // Step 4b: optional outline overlay (Sobel + dilate + colored fill) at
+  // output resolution so 1px lines are crisp. Disabled short-circuits to
+  // identity inside applyOutline.
+  const outlined = applyOutline(downscaled, {
+    enabled: msg.outlineEnabled ?? false,
+    width: msg.outlineWidth ?? 1,
+    color: (msg.outlineColor as [number, number, number] | undefined) ?? DEFAULT_OUTLINE_COLOR,
+  });
 
   // Step 5: quantize. Auto mode (no fixedPalette, no brandColors) is the
   // v1 path. Fixed-palette + brand-colors variations layer in via options.
-  const quantized = quantizePalette(downscaled, {
-    paletteSize: DEFAULT_PALETTE_SIZE,
+  // v3: paletteSize is now caller-controlled (default 16 preserves v2).
+  const quantized = quantizePalette(outlined, {
+    paletteSize: msg.paletteSize ?? DEFAULT_PALETTE_SIZE,
     fixedPalette: msg.fixedPalette,
     brandColors: msg.brandColors,
   });
 
+  // Step 6: apply silhouette mask if active. Zeros alpha where the mask
+  // says background; preserves alpha=255 elsewhere. The quantizer's
+  // alpha=255 force is harmless because applyMask runs after.
+  const masked = downscaledMask ? applyMask(quantized, downscaledMask) : quantized;
+
+  // Step 7: chunky pixel render. chunkSize=1 short-circuits to identity.
+  const final = chunkify(masked, msg.chunkSize ?? 1);
+
   const result: ProcessResult = {
     type: "result",
     jobId,
-    width: quantized.width,
-    height: quantized.height,
-    pixels: quantized.data,
+    width: final.width,
+    height: final.height,
+    pixels: final.data,
   };
-  self.postMessage(result, [quantized.data.buffer]);
+  self.postMessage(result, [final.data.buffer]);
 }
 
 export function computeTargetDims(
