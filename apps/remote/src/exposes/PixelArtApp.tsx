@@ -5,6 +5,7 @@ import BrandColorsTextarea from "../components/BrandColorsTextarea";
 import DropZone from "../components/DropZone";
 import OutlineControl, { type OutlineControlValue } from "../components/OutlineControl";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
+import PosterizationControl from "../components/PosterizationControl";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
@@ -45,6 +46,7 @@ export default function PixelArtApp() {
     width: 1,
     color: [0, 0, 0],
   });
+  const [posterizeBands, setPosterizeBands] = useState<number | undefined>(undefined);
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -99,6 +101,7 @@ export default function PixelArtApp() {
           outlineEnabled: outline.enabled,
           outlineWidth: outline.width,
           outlineColor: outline.color,
+          posterizeBands,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -122,6 +125,7 @@ export default function PixelArtApp() {
     customPaletteColors,
     brandColors,
     outline,
+    posterizeBands,
     process,
   ]);
 
@@ -204,6 +208,11 @@ export default function PixelArtApp() {
           disabled={!hasImage}
         />
         <OutlineControl value={outline} onChange={setOutline} disabled={!hasImage} />
+        <PosterizationControl
+          bands={posterizeBands}
+          onChange={setPosterizeBands}
+          disabled={!hasImage}
+        />
       </AdvancedControlsPanel>
 
       <SideBySidePreview

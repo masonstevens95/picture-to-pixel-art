@@ -8,6 +8,7 @@ import type {
 import { centerCrop } from "./crop";
 import { areaAverageDownscale } from "./downscale";
 import { applyOutline, DEFAULT_OUTLINE_COLOR } from "./outline";
+import { posterize } from "./posterize";
 import { quantizePalette } from "./quantize";
 import { saturationAdjust } from "./saturation";
 
@@ -87,11 +88,16 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
   const cropped =
     msg.aspectRatio !== undefined ? centerCrop(adjusted, msg.aspectRatio) : adjusted;
 
+  // Step 3b: optional posterization (per-channel band reduction). Runs
+  // before downscale so bands survive area-averaging. Identity when
+  // bands=undefined (R12 invariant).
+  const posterized = posterize(cropped, msg.posterizeBands);
+
   // Now compute target dimensions from the (possibly cropped) image.
-  const { width, height } = computeTargetDims(cropped.width, cropped.height, targetLongEdge);
+  const { width, height } = computeTargetDims(posterized.width, posterized.height, targetLongEdge);
 
   // Step 4: area-average downscale (pure JS, no canvas resize).
-  const downscaled = areaAverageDownscale(cropped, width, height);
+  const downscaled = areaAverageDownscale(posterized, width, height);
 
   // Step 4b: optional outline overlay (Sobel + dilate + colored fill) at
   // output resolution so 1px lines are crisp. Disabled short-circuits to

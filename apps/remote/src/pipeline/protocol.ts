@@ -41,6 +41,8 @@ export interface ProcessRequest {
   readonly outlineEnabled?: boolean;
   readonly outlineWidth?: number;
   readonly outlineColor?: readonly [number, number, number];
+  /** v3 posterization bands (2-8). Undefined = off. */
+  readonly posterizeBands?: number;
 }
 
 export interface ProcessResult {
