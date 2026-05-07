@@ -5,6 +5,7 @@ import BrandColorsTextarea from "../components/BrandColorsTextarea";
 import DropZone from "../components/DropZone";
 import OutlineControl, { type OutlineControlValue } from "../components/OutlineControl";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
+import ChunkyPixelsControl from "../components/ChunkyPixelsControl";
 import PosterizationControl from "../components/PosterizationControl";
 import SilhouetteControl, {
   DEFAULT_SILHOUETTE_TOLERANCE,
@@ -54,6 +55,7 @@ export default function PixelArtApp() {
   const [silhouetteTolerance, setSilhouetteTolerance] = useState<number>(
     DEFAULT_SILHOUETTE_TOLERANCE,
   );
+  const [chunkSize, setChunkSize] = useState(1);
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -111,6 +113,7 @@ export default function PixelArtApp() {
           posterizeBands,
           silhouetteEnabled,
           silhouetteTolerance,
+          chunkSize,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -137,6 +140,7 @@ export default function PixelArtApp() {
     posterizeBands,
     silhouetteEnabled,
     silhouetteTolerance,
+    chunkSize,
     process,
   ]);
 
@@ -231,6 +235,7 @@ export default function PixelArtApp() {
           onToleranceChange={setSilhouetteTolerance}
           disabled={!hasImage}
         />
+        <ChunkyPixelsControl chunkSize={chunkSize} onChange={setChunkSize} disabled={!hasImage} />
       </AdvancedControlsPanel>
 
       <SideBySidePreview

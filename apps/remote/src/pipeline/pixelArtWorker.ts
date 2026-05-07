@@ -7,6 +7,7 @@ import type {
 } from "./protocol";
 import { centerCrop } from "./crop";
 import { areaAverageDownscale } from "./downscale";
+import { chunkify } from "./chunky";
 import { applyOutline, DEFAULT_OUTLINE_COLOR } from "./outline";
 import { posterize } from "./posterize";
 import { quantizePalette } from "./quantize";
@@ -141,14 +142,17 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
   // alpha=255 force is harmless because applyMask runs after.
   const masked = downscaledMask ? applyMask(quantized, downscaledMask) : quantized;
 
+  // Step 7: chunky pixel render. chunkSize=1 short-circuits to identity.
+  const final = chunkify(masked, msg.chunkSize ?? 1);
+
   const result: ProcessResult = {
     type: "result",
     jobId,
-    width: masked.width,
-    height: masked.height,
-    pixels: masked.data,
+    width: final.width,
+    height: final.height,
+    pixels: final.data,
   };
-  self.postMessage(result, [masked.data.buffer]);
+  self.postMessage(result, [final.data.buffer]);
 }
 
 export function computeTargetDims(

@@ -46,6 +46,8 @@ export interface ProcessRequest {
   /** v3 silhouette (background-removal) options. Off by default. */
   readonly silhouetteEnabled?: boolean;
   readonly silhouetteTolerance?: number;
+  /** v3 chunky pixel size (1-4). Undefined or 1 = no-op. */
+  readonly chunkSize?: number;
 }
 
 export interface ProcessResult {
