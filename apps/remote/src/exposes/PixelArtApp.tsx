@@ -39,6 +39,13 @@ const DEFAULT_SATURATION = 0;
 export default function PixelArtApp() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
+  /**
+   * v4 source identity. Minted once per file load via `crypto.randomUUID()`
+   * and forwarded on every ProcessRequest for that file. Same file = same
+   * id (cache reuse); new file = new id (cache eviction). The host portfolio
+   * targets evergreen browsers, where `crypto.randomUUID()` is universal.
+   */
+  const [sourceId, setSourceId] = useState<string | null>(null);
   const [resolution, setResolution] = useState<ValidLongEdge>(DEFAULT_RESOLUTION);
   const [saturation, setSaturation] = useState<number>(DEFAULT_SATURATION);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioValue>(undefined);
@@ -72,14 +79,18 @@ export default function PixelArtApp() {
   const { state, process } = usePixelArtPipeline();
 
   // Object-URL lifecycle. Whenever the source file changes, mint a new URL
-  // for the source <img> preview and revoke the previous one.
+  // for the source <img> preview and revoke the previous one. Also mint a
+  // fresh sourceId so the worker treats this as a new source and evicts the
+  // previous source's cache.
   useEffect(() => {
     if (!sourceFile) {
       setSourceUrl(null);
+      setSourceId(null);
       return;
     }
     const url = URL.createObjectURL(sourceFile);
     setSourceUrl(url);
+    setSourceId(crypto.randomUUID());
     return () => {
       URL.revokeObjectURL(url);
     };
@@ -87,7 +98,7 @@ export default function PixelArtApp() {
 
   // Decode source -> ImageBitmap and dispatch when file or resolution changes.
   useEffect(() => {
-    if (!sourceFile) return;
+    if (!sourceFile || !sourceId) return;
     let cancelled = false;
     let bitmap: ImageBitmap | null = null;
 
@@ -113,6 +124,7 @@ export default function PixelArtApp() {
               ? (customPaletteColors ?? undefined)
               : undefined;
         process(transferable, resolution, {
+          sourceId,
           saturation,
           aspectRatio,
           fixedPalette,
@@ -140,6 +152,7 @@ export default function PixelArtApp() {
     };
   }, [
     sourceFile,
+    sourceId,
     resolution,
     saturation,
     aspectRatio,

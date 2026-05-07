@@ -39,6 +39,13 @@ export interface UsePixelArtPipelineOptions {
 }
 
 export interface ProcessOptions {
+  /**
+   * v4 opaque source identity. Required — every dispatch carries one.
+   * The component mints a fresh UUID on each new file load and forwards
+   * the same id for every subsequent dispatch on the same file. The
+   * worker keys its source cache on this id.
+   */
+  sourceId: string;
   /** -1..+1, default 0. Forwarded as ProcessRequest.saturation. */
   saturation?: number;
   /** Width/height. Undefined preserves source aspect (v1 default). */
@@ -64,7 +71,7 @@ export interface ProcessOptions {
 
 export interface UsePixelArtPipelineApi {
   state: PipelineState;
-  process: (bitmap: ImageBitmap, targetLongEdge: number, options?: ProcessOptions) => void;
+  process: (bitmap: ImageBitmap, targetLongEdge: number, options: ProcessOptions) => void;
 }
 
 const defaultWorkerFactory = (): Worker =>
@@ -125,7 +132,7 @@ export function usePixelArtPipeline(
   }, [workerFactory]);
 
   const process = useCallback(
-    (bitmap: ImageBitmap, targetLongEdge: number, options: ProcessOptions = {}) => {
+    (bitmap: ImageBitmap, targetLongEdge: number, options: ProcessOptions) => {
       if (!Number.isFinite(targetLongEdge) || targetLongEdge <= 0) {
         // Reject at the boundary — don't dispatch garbage to the worker.
         bitmap.close();
@@ -160,6 +167,7 @@ export function usePixelArtPipeline(
           jobId,
           bitmap: queued.bitmap,
           targetLongEdge: queued.targetLongEdge,
+          sourceId: queued.options.sourceId,
           saturation: queued.options.saturation,
           aspectRatio: queued.options.aspectRatio,
           fixedPalette: queued.options.fixedPalette,

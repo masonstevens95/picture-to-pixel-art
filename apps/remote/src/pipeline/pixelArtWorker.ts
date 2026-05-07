@@ -19,6 +19,7 @@ import {
   downscaleMask,
   sampleBackgroundColor,
 } from "./silhouette";
+import { SourceCacheManager } from "./sourceCache";
 
 /**
  * Worker entrypoint.
@@ -41,17 +42,37 @@ declare const self: DedicatedWorkerGlobalScope;
 const NEUTRAL_BACKGROUND = "#171717"; // Tailwind neutral-900, matches host chrome.
 const DEFAULT_PALETTE_SIZE = 16;
 
+/**
+ * Module-level source cache manager (U2 scaffolding). U3/U5/U6 will read
+ * and write its slots; for U2 it is instantiated, eviction is driven on
+ * each request, and the active entry is plumbed into the dispatch handler
+ * so future units can hang their cached values off it without further
+ * surgery here.
+ */
+const sourceCacheManager = new SourceCacheManager();
+
 self.addEventListener("message", (event: MessageEvent<WorkerInboundMessage>) => {
   const msg = event.data;
   if (msg?.type === "process") {
-    handleProcess(msg).catch((err) => {
+    handleProcess(msg, sourceCacheManager).catch((err) => {
       postError(msg.jobId, "internal_error", err instanceof Error ? err.message : String(err));
     });
   }
 });
 
-async function handleProcess(msg: ProcessRequest): Promise<void> {
-  const { jobId, bitmap, targetLongEdge } = msg;
+async function handleProcess(
+  msg: ProcessRequest,
+  cacheManager: SourceCacheManager,
+): Promise<void> {
+  const { jobId, bitmap, targetLongEdge, sourceId } = msg;
+
+  // U2: take (or replace) the active source cache entry. New sourceId
+  // evicts the previous entry; same sourceId returns the same reference
+  // so future units' cached values survive across requests for the same
+  // source. No consumers read or write the cache yet — U3/U5/U6 will.
+  // The result is intentionally unused for now; eslint silenced via a
+  // void cast at the call site below for clarity over `// eslint-disable`.
+  void cacheManager.getOrInit(sourceId);
 
   if (!Number.isFinite(targetLongEdge) || targetLongEdge <= 0) {
     postError(jobId, "invalid_input", `targetLongEdge must be positive, got ${targetLongEdge}`);

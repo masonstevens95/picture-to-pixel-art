@@ -16,6 +16,14 @@ export interface ProcessRequest {
   readonly bitmap: ImageBitmap;
   readonly targetLongEdge: number;
   /**
+   * v4 source identity. Required for every request — opaque string minted
+   * on the main thread (UUID per file load). The worker keys its in-process
+   * source cache (`SourceCacheManager`) on this id; equal id means same
+   * source, different id triggers cache eviction. No content hashing — the
+   * main thread already knows when the source file changed.
+   */
+  readonly sourceId: string;
+  /**
    * v2 optional fields. All have v1-equivalent defaults: absence reproduces
    * v1 behavior exactly. The worker must read each as `?? <v1-default>` so
    * the protocol stays forward-compatible.

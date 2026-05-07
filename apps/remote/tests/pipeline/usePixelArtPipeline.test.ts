@@ -14,6 +14,7 @@ interface QueuedMessage {
   jobId: number;
   bitmap: ImageBitmap;
   targetLongEdge: number;
+  sourceId: string;
 }
 
 class MockWorker {
@@ -31,12 +32,19 @@ class MockWorker {
     this.listeners = this.listeners.filter((l) => l !== listener);
   }
 
-  postMessage(message: { type: string; jobId: number; bitmap: ImageBitmap; targetLongEdge: number }): void {
+  postMessage(message: {
+    type: string;
+    jobId: number;
+    bitmap: ImageBitmap;
+    targetLongEdge: number;
+    sourceId: string;
+  }): void {
     if (message.type !== "process") return;
     this.sent.push({
       jobId: message.jobId,
       bitmap: message.bitmap,
       targetLongEdge: message.targetLongEdge,
+      sourceId: message.sourceId,
     });
   }
 
@@ -100,7 +108,7 @@ describe("usePixelArtPipeline", () => {
 
     const bmp = fakeBitmap();
     act(() => {
-      result.current.process(bmp, 64);
+      result.current.process(bmp, 64, { sourceId: "test-source-1" });
     });
     // Before debounce fires, nothing is sent.
     expect(worker.sent.length).toBe(0);
@@ -130,13 +138,14 @@ describe("usePixelArtPipeline", () => {
 
     act(() => {
       for (let i = 0; i < 10; i++) {
-        result.current.process(fakeBitmap(), 32);
+        result.current.process(fakeBitmap(), 32, { sourceId: "test-source-2" });
       }
       vi.advanceTimersByTime(16);
     });
 
     expect(worker.sent.length).toBe(1);
     expect(worker.sent[0]?.jobId).toBe(1);
+    expect(worker.sent[0]?.sourceId).toBe("test-source-2");
   });
 
   it("ignores results whose jobId is older than the latest dispatched", () => {
@@ -148,11 +157,11 @@ describe("usePixelArtPipeline", () => {
 
     // Two distinct dispatches separated by debounce flushes.
     act(() => {
-      result.current.process(fakeBitmap(), 32);
+      result.current.process(fakeBitmap(), 32, { sourceId: "test-source-3" });
       vi.advanceTimersByTime(16);
     });
     act(() => {
-      result.current.process(fakeBitmap(), 128);
+      result.current.process(fakeBitmap(), 128, { sourceId: "test-source-3" });
       vi.advanceTimersByTime(16);
     });
     expect(worker.sent.length).toBe(2);
@@ -182,7 +191,7 @@ describe("usePixelArtPipeline", () => {
 
     const bmp = fakeBitmap();
     act(() => {
-      result.current.process(bmp, 0);
+      result.current.process(bmp, 0, { sourceId: "test-source-4" });
       vi.advanceTimersByTime(16);
     });
     expect(worker.sent.length).toBe(0);
@@ -198,7 +207,7 @@ describe("usePixelArtPipeline", () => {
     );
 
     act(() => {
-      result.current.process(fakeBitmap(), 64);
+      result.current.process(fakeBitmap(), 64, { sourceId: "test-source-5" });
       vi.advanceTimersByTime(16);
       worker.emitError(1);
     });
@@ -217,12 +226,68 @@ describe("usePixelArtPipeline", () => {
     act(() => {
       // Queue a dispatch but don't advance past the debounce — bitmap is
       // still owned by the main thread, must be closed on unmount.
-      result.current.process(bmp, 64);
+      result.current.process(bmp, 64, { sourceId: "test-source-6" });
     });
     expect(worker.terminated).toBe(false);
     unmount();
     expect(worker.terminated).toBe(true);
     expect((bmp as unknown as { __closed: boolean }).__closed).toBe(true);
+  });
+
+  it("U2 addendum: terminate() clears worker state so a fresh worker can dispatch independently", () => {
+    // Doc-review flagged that no unit explicitly owns the assertion that
+    // worker termination drops in-worker state (including the U2 source
+    // cache). Worker termination tears down the entire worker, which
+    // implicitly drops everything it held; the observable contract is
+    // that a fresh hook instance gets a fresh worker, with a fresh jobId
+    // counter, fresh source cache, and no leakage from the old worker.
+    vi.useFakeTimers();
+
+    const firstWorker = new MockWorker();
+    const firstHook = renderHook(() =>
+      usePixelArtPipeline({
+        debounceMs: 16,
+        workerFactory: () => firstWorker as unknown as Worker,
+      }),
+    );
+
+    act(() => {
+      firstHook.result.current.process(fakeBitmap(), 64, { sourceId: "source-old" });
+      vi.advanceTimersByTime(16);
+    });
+    expect(firstWorker.sent.length).toBe(1);
+    expect(firstWorker.sent[0]?.jobId).toBe(1);
+    expect(firstWorker.sent[0]?.sourceId).toBe("source-old");
+
+    firstHook.unmount();
+    expect(firstWorker.terminated).toBe(true);
+
+    // A second hook (simulating remount) creates a fresh worker. Its jobId
+    // counter starts at 1 again, and the fresh worker has its own message
+    // ledger — there is no shared state with the terminated worker.
+    const secondWorker = new MockWorker();
+    expect(secondWorker.sent.length).toBe(0);
+    expect(secondWorker.terminated).toBe(false);
+
+    const secondHook = renderHook(() =>
+      usePixelArtPipeline({
+        debounceMs: 16,
+        workerFactory: () => secondWorker as unknown as Worker,
+      }),
+    );
+
+    act(() => {
+      secondHook.result.current.process(fakeBitmap(), 32, { sourceId: "source-new" });
+      vi.advanceTimersByTime(16);
+    });
+    expect(secondWorker.sent.length).toBe(1);
+    expect(secondWorker.sent[0]?.jobId).toBe(1); // fresh counter, not 2
+    expect(secondWorker.sent[0]?.sourceId).toBe("source-new");
+    // The terminated worker received nothing further.
+    expect(firstWorker.sent.length).toBe(1);
+
+    secondHook.unmount();
+    expect(secondWorker.terminated).toBe(true);
   });
 
   it("dropping a queued bitmap (replaced before debounce flush) closes the old one", () => {
@@ -235,10 +300,10 @@ describe("usePixelArtPipeline", () => {
     const first = fakeBitmap();
     const second = fakeBitmap();
     act(() => {
-      result.current.process(first, 32);
+      result.current.process(first, 32, { sourceId: "test-source-7" });
       // Before debounce flushes, dispatch again — first bitmap is now stranded
       // unless the hook closes it. Verify it does.
-      result.current.process(second, 64);
+      result.current.process(second, 64, { sourceId: "test-source-7" });
     });
     expect((first as unknown as { __closed: boolean }).__closed).toBe(true);
     expect((second as unknown as { __closed: boolean }).__closed).toBe(false);
