@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { dialsMatchPreset, FILTERS, type FilterId } from "../filters";
 import AdvancedControlsPanel from "../components/AdvancedControlsPanel";
 import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRatioSelect";
 import BrandColorsTextarea from "../components/BrandColorsTextarea";
@@ -14,6 +15,7 @@ import SilhouetteControl, {
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
+import StyleSelector, { type StyleSelectorValue } from "../components/StyleSelector";
 import { usePixelArtPipeline } from "../hooks/usePixelArtPipeline";
 import { downloadResultAsPng } from "../pipeline/exportPng";
 import { CURATED_PALETTES, type CuratedPaletteId, type RGB } from "../pipeline/palettes";
@@ -58,8 +60,14 @@ export default function PixelArtApp() {
   );
   const [chunkSize, setChunkSize] = useState(1);
   const [paletteSize, setPaletteSize] = useState(16);
+  // v3 Style state: which filter (if any) the dial state currently matches.
+  // 'custom' alone means user is on Custom intentionally; 'custom' with
+  // wasFilter set means they drifted from a previously-applied filter.
+  const [activeStyle, setActiveStyle] = useState<StyleSelectorValue>("custom");
+  const [wasFilter, setWasFilter] = useState<FilterId | null>(null);
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
+  const styleSelectorRef = useRef<HTMLSelectElement | null>(null);
 
   const { state, process } = usePixelArtPipeline();
 
@@ -177,6 +185,84 @@ export default function PixelArtApp() {
     setSourceFile(null);
   }, []);
 
+  // v3 filter apply: batch-set every dial state to the preset's values.
+  // React 18 auto-batches multiple setState calls within an event handler
+  // so all updates land in a single render. Per scope-guardian doc-review
+  // feedback, we do NOT use flushSync (which would defeat batching).
+  const applyFilter = useCallback((id: FilterId) => {
+    const p = FILTERS[id];
+    setResolution(p.resolution);
+    setSaturation(p.saturation);
+    setAspectRatio(p.aspectRatio);
+    setPaletteMode(p.paletteMode);
+    setCuratedPaletteId(p.curatedPaletteId);
+    setPaletteSize(p.paletteSize);
+    setOutline({ enabled: p.outlineEnabled, width: p.outlineWidth, color: p.outlineColor });
+    setPosterizeBands(p.posterizeBands);
+    setSilhouetteEnabled(p.silhouetteEnabled);
+    setSilhouetteTolerance(p.silhouetteTolerance);
+    setChunkSize(p.chunkSize);
+    setActiveStyle(id);
+    setWasFilter(null);
+  }, []);
+
+  const handlePickCustom = useCallback(() => {
+    setActiveStyle("custom");
+    setWasFilter(null);
+  }, []);
+
+  const handleResetFilter = useCallback(() => {
+    if (wasFilter) {
+      applyFilter(wasFilter);
+      // Per design-lens doc-review: focus returns to the Style dropdown so
+      // keyboard users stay oriented after the modified indicator clears.
+      styleSelectorRef.current?.focus();
+    }
+  }, [wasFilter, applyFilter]);
+
+  // Modified-state detection: when any dial drifts from the active filter's
+  // expected values, flip activeStyle to "custom" and remember which filter
+  // we were on so the StyleSelector can show "(was: X)" + Reset.
+  useEffect(() => {
+    if (activeStyle === "custom") return;
+    const preset = FILTERS[activeStyle];
+    const matches = dialsMatchPreset(
+      {
+        resolution,
+        saturation,
+        aspectRatio,
+        paletteMode,
+        curatedPaletteId,
+        paletteSize,
+        outlineEnabled: outline.enabled,
+        outlineWidth: outline.width,
+        outlineColor: outline.color,
+        posterizeBands,
+        silhouetteEnabled,
+        silhouetteTolerance,
+        chunkSize,
+      },
+      preset,
+    );
+    if (!matches) {
+      setWasFilter(activeStyle);
+      setActiveStyle("custom");
+    }
+  }, [
+    activeStyle,
+    resolution,
+    saturation,
+    aspectRatio,
+    paletteMode,
+    curatedPaletteId,
+    paletteSize,
+    outline,
+    posterizeBands,
+    silhouetteEnabled,
+    silhouetteTolerance,
+    chunkSize,
+  ]);
+
   const handleExport = useCallback(() => {
     if (!state.result) return;
     void downloadResultAsPng(state.result);
@@ -196,6 +282,20 @@ export default function PixelArtApp() {
       />
 
       <DropZone onChange={handleFile} disabled={false} />
+
+      {/* Style selector is the highest-leverage v3 control. Above the resolution
+         slider; enabled regardless of image-load state so users can pre-arm a
+         Style before dropping (F3 game-asset workflow). */}
+      <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+        <StyleSelector
+          ref={styleSelectorRef}
+          value={activeStyle}
+          previousFilter={wasFilter}
+          onPickFilter={applyFilter}
+          onPickCustom={handlePickCustom}
+          onReset={handleResetFilter}
+        />
+      </div>
 
       <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
         <ResolutionSlider value={resolution} onChange={setResolution} disabled={!hasImage} />
