@@ -265,8 +265,10 @@ export default function PixelArtApp() {
 
   const handleExport = useCallback(() => {
     if (!state.result) return;
-    void downloadResultAsPng(state.result);
-  }, [state.result]);
+    // Pass active style so the filename carries the asset-type label for
+    // game-asset folder sorting (R11 / AE6).
+    void downloadResultAsPng(state.result, activeStyle);
+  }, [state.result, activeStyle]);
 
   const hasImage = sourceFile !== null;
   const canExport = state.status === "ready" && state.result !== null;

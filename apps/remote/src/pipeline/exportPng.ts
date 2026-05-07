@@ -6,6 +6,12 @@
  * not an upscaled version. The browser injects no smoothing here because we
  * never `drawImage` to a different size; we just `putImageData` 1:1 and
  * `convertToBlob` it.
+ *
+ * v3: the buffer's alpha is preserved through to the PNG. Silhouette-enabled
+ * outputs carry alpha=0 on background pixels and survive export with
+ * transparency intact (R10). This file does NOT force alpha=255 anywhere —
+ * the quantizer's per-pixel alpha=255 write happens before silhouette's
+ * applyMask, so alpha=0 from silhouette is the final value reaching here.
  */
 
 export interface ExportableBuffer {
@@ -40,7 +46,16 @@ export async function bufferToPngBlob(buffer: ExportableBuffer): Promise<Blob> {
   return canvas.convertToBlob({ type: "image/png" });
 }
 
-export function pngFilename(width: number, height: number): string {
+/**
+ * Build the export filename. When `style` is provided and not "custom",
+ * the active style is included so users batching outputs into a folder
+ * can sort/group them: `pixel-art-environment-192x144.png`. Custom and
+ * undefined produce the v2 naming `pixel-art-WxH.png`.
+ */
+export function pngFilename(width: number, height: number, style?: string): string {
+  if (style && style !== "custom") {
+    return `pixel-art-${style}-${width}x${height}.png`;
+  }
   return `pixel-art-${width}x${height}.png`;
 }
 
@@ -61,7 +76,10 @@ export function triggerDownload(blob: Blob, filename: string): void {
   queueMicrotask(() => URL.revokeObjectURL(url));
 }
 
-export async function downloadResultAsPng(buffer: ExportableBuffer): Promise<void> {
+export async function downloadResultAsPng(
+  buffer: ExportableBuffer,
+  style?: string,
+): Promise<void> {
   const blob = await bufferToPngBlob(buffer);
-  triggerDownload(blob, pngFilename(buffer.width, buffer.height));
+  triggerDownload(blob, pngFilename(buffer.width, buffer.height, style));
 }

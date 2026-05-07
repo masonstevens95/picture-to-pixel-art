@@ -1,7 +1,7 @@
 ---
 title: "feat: Pixel-Art Style Filters (v3)"
 type: feat
-status: active
+status: completed
 date: 2026-05-06
 origin: docs/brainstorms/2026-05-06-pixel-art-style-filters-requirements.md
 ---
