@@ -11,6 +11,13 @@ import { applyOutline, DEFAULT_OUTLINE_COLOR } from "./outline";
 import { posterize } from "./posterize";
 import { quantizePalette } from "./quantize";
 import { saturationAdjust } from "./saturation";
+import {
+  applyMask,
+  buildMask,
+  DEFAULT_SILHOUETTE_TOLERANCE,
+  downscaleMask,
+  sampleBackgroundColor,
+} from "./silhouette";
 
 /**
  * Worker entrypoint.
@@ -88,6 +95,15 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
   const cropped =
     msg.aspectRatio !== undefined ? centerCrop(adjusted, msg.aspectRatio) : adjusted;
 
+  // Step 3a: optional silhouette mask — sample corners of the CROPPED image
+  // (per v3 plan post-crop fix) so the mask coordinates align with what the
+  // user will see. Built at cropped dims; downscaled alongside the main image.
+  const silhouetteEnabled = msg.silhouetteEnabled === true;
+  const silhouetteTolerance = msg.silhouetteTolerance ?? DEFAULT_SILHOUETTE_TOLERANCE;
+  const sourceMask = silhouetteEnabled
+    ? buildMask(cropped, sampleBackgroundColor(cropped), silhouetteTolerance)
+    : null;
+
   // Step 3b: optional posterization (per-channel band reduction). Runs
   // before downscale so bands survive area-averaging. Identity when
   // bands=undefined (R12 invariant).
@@ -98,6 +114,10 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
 
   // Step 4: area-average downscale (pure JS, no canvas resize).
   const downscaled = areaAverageDownscale(posterized, width, height);
+
+  // Step 4a: downscale the silhouette mask alongside the image (nearest-
+  // neighbor preserves binary semantics).
+  const downscaledMask = sourceMask ? downscaleMask(sourceMask, width, height) : null;
 
   // Step 4b: optional outline overlay (Sobel + dilate + colored fill) at
   // output resolution so 1px lines are crisp. Disabled short-circuits to
@@ -116,14 +136,19 @@ async function handleProcess(msg: ProcessRequest): Promise<void> {
     brandColors: msg.brandColors,
   });
 
+  // Step 6: apply silhouette mask if active. Zeros alpha where the mask
+  // says background; preserves alpha=255 elsewhere. The quantizer's
+  // alpha=255 force is harmless because applyMask runs after.
+  const masked = downscaledMask ? applyMask(quantized, downscaledMask) : quantized;
+
   const result: ProcessResult = {
     type: "result",
     jobId,
-    width: quantized.width,
-    height: quantized.height,
-    pixels: quantized.data,
+    width: masked.width,
+    height: masked.height,
+    pixels: masked.data,
   };
-  self.postMessage(result, [quantized.data.buffer]);
+  self.postMessage(result, [masked.data.buffer]);
 }
 
 export function computeTargetDims(

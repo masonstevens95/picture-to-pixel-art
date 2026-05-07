@@ -53,6 +53,9 @@ export interface ProcessOptions {
   outlineColor?: readonly [number, number, number];
   /** v3 posterization bands (2-8). Undefined = off. */
   posterizeBands?: number;
+  /** v3 silhouette options. */
+  silhouetteEnabled?: boolean;
+  silhouetteTolerance?: number;
 }
 
 export interface UsePixelArtPipelineApi {
@@ -161,6 +164,8 @@ export function usePixelArtPipeline(
           outlineWidth: queued.options.outlineWidth,
           outlineColor: queued.options.outlineColor,
           posterizeBands: queued.options.posterizeBands,
+          silhouetteEnabled: queued.options.silhouetteEnabled,
+          silhouetteTolerance: queued.options.silhouetteTolerance,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

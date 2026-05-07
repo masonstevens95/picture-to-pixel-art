@@ -6,6 +6,9 @@ import DropZone from "../components/DropZone";
 import OutlineControl, { type OutlineControlValue } from "../components/OutlineControl";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
 import PosterizationControl from "../components/PosterizationControl";
+import SilhouetteControl, {
+  DEFAULT_SILHOUETTE_TOLERANCE,
+} from "../components/SilhouetteControl";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
 import SideBySidePreview from "../components/SideBySidePreview";
@@ -47,6 +50,10 @@ export default function PixelArtApp() {
     color: [0, 0, 0],
   });
   const [posterizeBands, setPosterizeBands] = useState<number | undefined>(undefined);
+  const [silhouetteEnabled, setSilhouetteEnabled] = useState(false);
+  const [silhouetteTolerance, setSilhouetteTolerance] = useState<number>(
+    DEFAULT_SILHOUETTE_TOLERANCE,
+  );
   const sourceBitmapRef = useRef<ImageBitmap | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
@@ -102,6 +109,8 @@ export default function PixelArtApp() {
           outlineWidth: outline.width,
           outlineColor: outline.color,
           posterizeBands,
+          silhouetteEnabled,
+          silhouetteTolerance,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -126,6 +135,8 @@ export default function PixelArtApp() {
     brandColors,
     outline,
     posterizeBands,
+    silhouetteEnabled,
+    silhouetteTolerance,
     process,
   ]);
 
@@ -211,6 +222,13 @@ export default function PixelArtApp() {
         <PosterizationControl
           bands={posterizeBands}
           onChange={setPosterizeBands}
+          disabled={!hasImage}
+        />
+        <SilhouetteControl
+          enabled={silhouetteEnabled}
+          tolerance={silhouetteTolerance}
+          onEnabledChange={setSilhouetteEnabled}
+          onToleranceChange={setSilhouetteTolerance}
           disabled={!hasImage}
         />
       </AdvancedControlsPanel>

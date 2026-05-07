@@ -43,6 +43,9 @@ export interface ProcessRequest {
   readonly outlineColor?: readonly [number, number, number];
   /** v3 posterization bands (2-8). Undefined = off. */
   readonly posterizeBands?: number;
+  /** v3 silhouette (background-removal) options. Off by default. */
+  readonly silhouetteEnabled?: boolean;
+  readonly silhouetteTolerance?: number;
 }
 
 export interface ProcessResult {
