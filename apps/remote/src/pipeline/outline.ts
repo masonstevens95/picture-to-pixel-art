@@ -1,24 +1,38 @@
 /**
- * Sobel edge detection + line thickening + colored overlay.
+ * Outline overlay pipeline stage.
  *
- * Runs at output resolution (post-downscale, pre-quantize) so 1-pixel-wide
- * outlines are crisp. Sobel computes per-pixel gradient magnitude on
- * luminance; threshold at SOBEL_THRESHOLD produces a binary edge mask.
- * Dilation expands the mask by `width − 1` 4-neighbor passes. Outline color
- * overlays the input where mask is true; quantization runs after so the
- * outline color participates in palette assignment.
+ * v4 internals: Winnemöller XDoG edge detection (see `xdog.ts`) replaces v3's
+ * Sobel gradient. The external API is unchanged: `applyOutline(image, options)`
+ * takes the same `OutlineOptions` shape v3 exposed, returns an `ImageData`.
+ *
+ * Why XDoG over Sobel:
+ *   Sobel fires on every gradient — including skin texture, hair strands,
+ *   noise — producing the "halo around every detail" failure on photos.
+ *   XDoG's tanh-thresholded difference-of-Gaussians suppresses low-contrast
+ *   gradients (interior detail) while preserving high-contrast subject
+ *   silhouettes. The dilation pass and color overlay are unchanged from v3.
+ *
+ * Pipeline position (v4): post-quantize, pre-silhouette-mask. The shift from
+ * pre-quantize (v3) to post-quantize (v4) keeps the configured outline color
+ * exact in the output — quantization can no longer absorb the outline color
+ * into the nearest palette bucket.
  *
  * enabled=false short-circuits at the function level — returns the input
- * ImageData unchanged. Required for the v3 invariant (R12 / U7 test).
+ * ImageData unchanged (same reference). Required for the v3 invariant
+ * (R12 / U7 test) and the v4-default invariant.
  *
- * Width = 1 → 1px outline (mask itself, no dilation passes).
+ * Width = 1 → 1px outline (XDoG mask itself, no dilation passes).
  * Width = 2 → 2px outline (1 dilation pass).
  * Width = 3 → 3px outline (2 dilation passes).
+ *
+ * Small-input safety: 1×1 and 2×2 images return the input unchanged. XDoG's
+ * 3-tap kernel is technically defined on those sizes, but no edges are
+ * possible at sub-3 dims and the explicit short-circuit keeps boundary
+ * behavior crisp and documented.
  */
 
 import type { RGB } from "./palettes";
-
-const SOBEL_THRESHOLD = 50; // 0..255 magnitude cutoff. Tunable in code, not exposed.
+import { xdog } from "./xdog";
 
 export interface OutlineOptions {
   enabled: boolean;
@@ -34,38 +48,27 @@ export function applyOutline(image: ImageData, options: OutlineOptions): ImageDa
   const h = image.height;
 
   if (w < 3 || h < 3) {
-    // Sobel needs 3x3 neighborhoods. Image too small → nothing to outline.
+    // Too small for meaningful edge detection — nothing to outline.
     return image;
   }
 
-  // Step 1: compute Sobel edge mask on luminance.
+  // Step 1: compute luminance, then run XDoG → binary edge mask (0 or 255).
   const luma = new Float32Array(w * h);
   for (let i = 0, p = 0; p < image.data.length; p += 4, i++) {
     luma[i] =
       0.299 * image.data[p]! + 0.587 * image.data[p + 1]! + 0.114 * image.data[p + 2]!;
   }
+  const xdogMask = xdog(luma, w, h);
 
-  // Edge mask stored as Uint8Array (0 or 1) so dilation can read/write cheaply.
+  // Convert XDoG's 0/255 mask into a compact 0/1 mask for the dilation
+  // inner loop — branch on `mask[idx]` truthiness, same as v3.
   let mask = new Uint8Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const tl = luma[(y - 1) * w + (x - 1)]!;
-      const tc = luma[(y - 1) * w + x]!;
-      const tr = luma[(y - 1) * w + (x + 1)]!;
-      const ml = luma[y * w + (x - 1)]!;
-      const mr = luma[y * w + (x + 1)]!;
-      const bl = luma[(y + 1) * w + (x - 1)]!;
-      const bc = luma[(y + 1) * w + x]!;
-      const br = luma[(y + 1) * w + (x + 1)]!;
-
-      const gx = -tl - 2 * ml - bl + tr + 2 * mr + br;
-      const gy = -tl - 2 * tc - tr + bl + 2 * bc + br;
-      const mag = Math.sqrt(gx * gx + gy * gy);
-      if (mag >= SOBEL_THRESHOLD) mask[y * w + x] = 1;
-    }
+  for (let i = 0; i < mask.length; i++) {
+    if (xdogMask[i]) mask[i] = 1;
   }
 
-  // Step 2: dilate the mask `outlineWidth − 1` times via 4-neighbor expansion.
+  // Step 2: dilate the mask `outlineWidth − 1` times via 4-neighbor
+  // expansion. Identical to v3 — only the edge-detection upstream changed.
   for (let pass = 1; pass < outlineWidth; pass++) {
     const next = new Uint8Array(mask.length);
     for (let y = 0; y < h; y++) {

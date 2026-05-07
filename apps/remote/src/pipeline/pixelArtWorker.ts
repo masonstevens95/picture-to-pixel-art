@@ -157,28 +157,32 @@ async function handleProcess(
   // neighbor preserves binary semantics).
   const downscaledMask = sourceMask ? downscaleMask(sourceMask, width, height) : null;
 
-  // Step 4b: optional outline overlay (Sobel + dilate + colored fill) at
-  // output resolution so 1px lines are crisp. Disabled short-circuits to
-  // identity inside applyOutline.
-  const outlined = applyOutline(downscaled, {
-    enabled: msg.outlineEnabled ?? false,
-    width: msg.outlineWidth ?? 1,
-    color: (msg.outlineColor as [number, number, number] | undefined) ?? DEFAULT_OUTLINE_COLOR,
-  });
-
   // Step 5: quantize. Auto mode (no fixedPalette, no brandColors) is the
   // v1 path. Fixed-palette + brand-colors variations layer in via options.
   // v3: paletteSize is now caller-controlled (default 16 preserves v2).
-  const quantized = quantizePalette(outlined, {
+  // v4: outline runs AFTER quantize (see step 6) so the configured outline
+  // color is not absorbed into the palette.
+  const quantized = quantizePalette(downscaled, {
     paletteSize: msg.paletteSize ?? DEFAULT_PALETTE_SIZE,
     fixedPalette: msg.fixedPalette,
     brandColors: msg.brandColors,
   });
 
-  // Step 6: apply silhouette mask if active. Zeros alpha where the mask
+  // Step 6: optional outline overlay (XDoG + dilate + colored fill) at
+  // output resolution so 1px lines are crisp. v4 moves this from pre- to
+  // post-quantize: the outline color paints onto already-quantized pixels
+  // and survives to the output exactly as configured (no palette
+  // absorption). Disabled short-circuits to identity inside applyOutline.
+  const outlined = applyOutline(quantized, {
+    enabled: msg.outlineEnabled ?? false,
+    width: msg.outlineWidth ?? 1,
+    color: (msg.outlineColor as [number, number, number] | undefined) ?? DEFAULT_OUTLINE_COLOR,
+  });
+
+  // Step 6a: apply silhouette mask if active. Zeros alpha where the mask
   // says background; preserves alpha=255 elsewhere. The quantizer's
   // alpha=255 force is harmless because applyMask runs after.
-  const masked = downscaledMask ? applyMask(quantized, downscaledMask) : quantized;
+  const masked = downscaledMask ? applyMask(outlined, downscaledMask) : outlined;
 
   // Step 7: chunky pixel render. chunkSize=1 short-circuits to identity.
   const final = chunkify(masked, msg.chunkSize ?? 1);
