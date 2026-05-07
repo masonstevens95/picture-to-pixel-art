@@ -11,6 +11,7 @@ import PaletteSizeControl from "../components/PaletteSizeControl";
 import PosterizationControl from "../components/PosterizationControl";
 import SilhouetteControl, {
   DEFAULT_SILHOUETTE_TOLERANCE,
+  type SilhouetteQuality,
 } from "../components/SilhouetteControl";
 import ResolutionSlider from "../components/ResolutionSlider";
 import SaturationSlider from "../components/SaturationSlider";
@@ -67,6 +68,10 @@ export default function PixelArtApp() {
   const [silhouetteTolerance, setSilhouetteTolerance] = useState<number>(
     DEFAULT_SILHOUETTE_TOLERANCE,
   );
+  // v4 silhouette quality. Default 'fast' preserves R12 byte-identical
+  // output (and matches the Custom filter's preset). Filters that opt into
+  // ML segmentation (Asset, in U7) set this to 'smart' on apply.
+  const [silhouetteQuality, setSilhouetteQuality] = useState<SilhouetteQuality>("fast");
   const [chunkSize, setChunkSize] = useState(1);
   const [paletteSize, setPaletteSize] = useState(16);
   // v4 cartoon-smoothing. Default 'off' is the R12 identity path; the
@@ -141,6 +146,7 @@ export default function PixelArtApp() {
           posterizeBands,
           silhouetteEnabled,
           silhouetteTolerance,
+          silhouetteQuality,
           chunkSize,
           paletteSize,
           smoothness,
@@ -171,6 +177,7 @@ export default function PixelArtApp() {
     posterizeBands,
     silhouetteEnabled,
     silhouetteTolerance,
+    silhouetteQuality,
     chunkSize,
     paletteSize,
     smoothness,
@@ -362,6 +369,9 @@ export default function PixelArtApp() {
           tolerance={silhouetteTolerance}
           onEnabledChange={setSilhouetteEnabled}
           onToleranceChange={setSilhouetteTolerance}
+          quality={silhouetteQuality}
+          onQualityChange={setSilhouetteQuality}
+          mlAvailable={state.mlStatus.segmentation !== "failed"}
           disabled={!hasImage}
         />
         <ChunkyPixelsControl chunkSize={chunkSize} onChange={setChunkSize} disabled={!hasImage} />

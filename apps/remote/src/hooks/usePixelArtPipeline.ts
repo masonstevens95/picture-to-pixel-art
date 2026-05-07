@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  isMLErrorMessage,
+  isMLStatusMessage,
   isProcessResult,
   isWorkerError,
+  type MLErrorMessage,
+  type MLStage,
+  type MLStatusMessage,
   type ProcessRequest,
   type ProcessResult,
   type WorkerErrorMessage,
@@ -22,10 +27,25 @@ const DEFAULT_DEBOUNCE_MS = 16;
 
 export type PipelineStatus = "idle" | "processing" | "ready" | "error";
 
+/**
+ * v4 ML status surfaced to the UI. One entry per stage; absent stage means
+ * "never attempted" (the U2-NetP / Face Landmarker hasn't been hit yet).
+ *
+ * U8 reads this slice to drive the ModelLoadIndicator (loading) and
+ * DegradedModeNotice (failed) components.
+ */
+export type MLPhase = "loading" | "ready" | "failed";
+
+export type MLStatusMap = Partial<Record<MLStage, MLPhase>>;
+
 export interface PipelineState {
   status: PipelineStatus;
   result: ProcessResult | null;
   error: WorkerErrorMessage | null;
+  /** Latest phase emitted per ML stage. Empty until first stage attempt. */
+  mlStatus: MLStatusMap;
+  /** Latest ml-error per stage. Cleared only across hook remounts. */
+  mlError: MLErrorMessage | null;
 }
 
 export interface UsePixelArtPipelineOptions {
@@ -73,6 +93,13 @@ export interface ProcessOptions {
    * its bilateral output on this value.
    */
   smoothness?: "off" | "low" | "medium" | "high";
+  /**
+   * v4 silhouette quality. Undefined = 'fast' (v3 naive corner-sample;
+   * R12 invariant). 'smart' triggers the U2-NetP path in the worker;
+   * model load failure falls back to 'fast' and emits an `ml-error`
+   * outbound message that the hook reflects in `state.mlError`.
+   */
+  silhouetteQuality?: "fast" | "smart";
 }
 
 export interface UsePixelArtPipelineApi {
@@ -92,6 +119,8 @@ export function usePixelArtPipeline(
     status: "idle",
     result: null,
     error: null,
+    mlStatus: {},
+    mlError: null,
   });
 
   const workerRef = useRef<Worker | null>(null);
@@ -127,12 +156,30 @@ export function usePixelArtPipeline(
       const msg = event.data;
       if (isProcessResult(msg)) {
         if (msg.jobId !== latestJobIdRef.current) return; // superseded
-        setState({ status: "ready", result: msg, error: null });
+        setState((prev) => ({ ...prev, status: "ready", result: msg, error: null }));
         return;
       }
       if (isWorkerError(msg)) {
         if (msg.jobId !== latestJobIdRef.current) return;
-        setState({ status: "error", result: null, error: msg });
+        setState((prev) => ({ ...prev, status: "error", result: null, error: msg }));
+        return;
+      }
+      // ML status / error messages are not jobId-keyed — they are session-
+      // level signals (the model loaded once for the whole session, so the
+      // status reflects the most recent transition regardless of which job
+      // triggered it). We merge into state without affecting `status`/`result`.
+      if (isMLStatusMessage(msg)) {
+        const update = msg as MLStatusMessage;
+        setState((prev) => ({
+          ...prev,
+          mlStatus: { ...prev.mlStatus, [update.stage]: update.phase },
+        }));
+        return;
+      }
+      if (isMLErrorMessage(msg)) {
+        const update = msg as MLErrorMessage;
+        setState((prev) => ({ ...prev, mlError: update }));
+        return;
       }
     }
   }, [workerFactory]);
@@ -187,6 +234,7 @@ export function usePixelArtPipeline(
           chunkSize: queued.options.chunkSize,
           paletteSize: queued.options.paletteSize,
           smoothness: queued.options.smoothness,
+          silhouetteQuality: queued.options.silhouetteQuality,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

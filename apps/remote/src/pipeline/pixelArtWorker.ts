@@ -1,5 +1,8 @@
 /// <reference lib="webworker" />
 import type {
+  MLErrorCode,
+  MLErrorMessage,
+  MLStatusMessage,
   ProcessRequest,
   ProcessResult,
   WorkerErrorMessage,
@@ -21,6 +24,8 @@ import {
   sampleBackgroundColor,
 } from "./silhouette";
 import { SourceCacheManager } from "./sourceCache";
+import { runAndCacheSegmentation } from "../ml/segmentation";
+import { MLRuntimeError, type MLRuntimeErrorCode } from "../ml/types";
 
 /**
  * Worker entrypoint.
@@ -51,6 +56,68 @@ const DEFAULT_PALETTE_SIZE = 16;
  * surgery here.
  */
 const sourceCacheManager = new SourceCacheManager();
+
+/**
+ * Per-session emitted-once flags for `ml-error` outbound messages.
+ *
+ * Why module-level: the worker instance lives for the lifetime of the
+ * pixel-art tab. The R7 / R8 contract is "surface the degraded notice
+ * once per session, not on every dispatch" — repeated emit would spam
+ * the main-thread state. Stage-keyed because U6 will share this map.
+ */
+const mlErrorEmitted: Record<"segmentation" | "face-landmarks", boolean> = {
+  segmentation: false,
+  "face-landmarks": false,
+};
+
+/**
+ * Per-session ml-status memo: emit transitions, not every dispatch.
+ * 'loading' fires the first time we attempt a stage; 'ready' once on
+ * the first successful inference; 'failed' once on the first error.
+ */
+const mlStatusEmitted: Record<
+  "segmentation" | "face-landmarks",
+  { loading: boolean; ready: boolean; failed: boolean }
+> = {
+  segmentation: { loading: false, ready: false, failed: false },
+  "face-landmarks": { loading: false, ready: false, failed: false },
+};
+
+function emitMLStatus(stage: MLStatusMessage["stage"], phase: MLStatusMessage["phase"]): void {
+  if (mlStatusEmitted[stage][phase]) return;
+  mlStatusEmitted[stage][phase] = true;
+  const msg: MLStatusMessage = { type: "ml-status", stage, phase };
+  self.postMessage(msg);
+}
+
+function emitMLError(stage: MLErrorMessage["stage"], code: MLErrorCode): void {
+  if (mlErrorEmitted[stage]) return;
+  mlErrorEmitted[stage] = true;
+  const msg: MLErrorMessage = { type: "ml-error", stage, code };
+  self.postMessage(msg);
+}
+
+/**
+ * Coerce an unknown thrown value into the wire-shape MLErrorCode. Catches
+ * the case where ORT throws something other than our typed error.
+ */
+function toMLErrorCode(err: unknown): MLErrorCode {
+  if (err instanceof MLRuntimeError) {
+    // MLRuntimeErrorCode and MLErrorCode are deliberately the same
+    // enum; cast is safe (kept narrow so a future divergence shows up
+    // as a type error rather than at runtime).
+    return err.code satisfies MLRuntimeErrorCode;
+  }
+  return "inference_failed";
+}
+
+/** Test-only: clear the per-session emit memos so a fresh test starts cleanly. */
+export function __resetWorkerMLStateForTests(): void {
+  mlErrorEmitted.segmentation = false;
+  mlErrorEmitted["face-landmarks"] = false;
+  mlStatusEmitted.segmentation = { loading: false, ready: false, failed: false };
+  mlStatusEmitted["face-landmarks"] = { loading: false, ready: false, failed: false };
+}
 
 self.addEventListener("message", (event: MessageEvent<WorkerInboundMessage>) => {
   const msg = event.data;
@@ -133,14 +200,58 @@ async function handleProcess(
   const cropped =
     msg.aspectRatio !== undefined ? centerCrop(adjusted, msg.aspectRatio) : adjusted;
 
-  // Step 3a: optional silhouette mask — sample corners of the CROPPED image
-  // (per v3 plan post-crop fix) so the mask coordinates align with what the
-  // user will see. Built at cropped dims; downscaled alongside the main image.
+  // Step 3a: optional silhouette mask. Two routes:
+  //   - Fast (or undefined) → naive corner-sample on the CROPPED image
+  //     (per v3 plan post-crop fix). This is the v3 path; identical
+  //     behavior when silhouetteQuality is absent.
+  //   - Smart → ML segmentation via U2-NetP on the SMOOTHED source, then
+  //     crop the mask alongside the image so dims match `cropped`.
+  //
+  // R12 invariant gate: when `silhouetteEnabled === false` we never call
+  // into the ML path at all — no `getOrtSession`, no fetch, no model
+  // load. Same gating principle U6 applies for face landmarks.
   const silhouetteEnabled = msg.silhouetteEnabled === true;
   const silhouetteTolerance = msg.silhouetteTolerance ?? DEFAULT_SILHOUETTE_TOLERANCE;
-  const sourceMask = silhouetteEnabled
-    ? buildMask(cropped, sampleBackgroundColor(cropped), silhouetteTolerance)
-    : null;
+  const silhouetteQuality = msg.silhouetteQuality ?? "fast";
+  let sourceMask: ImageData | null = null;
+  if (silhouetteEnabled) {
+    if (silhouetteQuality === "smart") {
+      // Smart: try ML, fall back to naive on failure (with one-shot
+      // ml-error emit). Cache reuse across dispatches: if a mask for
+      // this sourceId is already cached (from an earlier Smart dispatch),
+      // skip the inference and re-use it. The mask is computed on the
+      // smoothed (or just-rasterized) source, so it doesn't depend on
+      // the per-dispatch saturation / posterize / outline knobs.
+      const cached = cache.segmentationMask;
+      if (cached && cached.width === smoothed.width && cached.height === smoothed.height) {
+        sourceMask = cached;
+      } else {
+        emitMLStatus("segmentation", "loading");
+        try {
+          const mlMask = await runAndCacheSegmentation(smoothed, sourceId, cacheManager);
+          emitMLStatus("segmentation", "ready");
+          sourceMask = mlMask;
+        } catch (err) {
+          emitMLStatus("segmentation", "failed");
+          emitMLError("segmentation", toMLErrorCode(err));
+          // Fall back to naive corner-sample on the cropped image.
+          sourceMask = buildMask(
+            cropped,
+            sampleBackgroundColor(cropped),
+            silhouetteTolerance,
+          );
+        }
+      }
+      // The ML mask is at smoothed (pre-crop) dims; crop it to match
+      // `cropped` if a crop happened. cropMaskToImage handles both cases.
+      if (sourceMask && (sourceMask.width !== cropped.width || sourceMask.height !== cropped.height)) {
+        sourceMask = cropMaskToMatch(sourceMask, smoothed.width, smoothed.height, cropped);
+      }
+    } else {
+      // Fast (v3 path): naive corner-sample post-crop.
+      sourceMask = buildMask(cropped, sampleBackgroundColor(cropped), silhouetteTolerance);
+    }
+  }
 
   // Step 3b: optional posterization (per-channel band reduction). Runs
   // before downscale so bands survive area-averaging. Identity when
@@ -195,6 +306,47 @@ async function handleProcess(
     pixels: final.data,
   };
   self.postMessage(result, [final.data.buffer]);
+}
+
+/**
+ * Center-crop a binary mask to match the dims of an already-cropped image.
+ *
+ * The ML mask comes back at the pre-crop source dims (smoothed). When the
+ * worker has applied a center crop to the image, the mask must be cropped
+ * the same way so `applyMask` sees matching dims. This re-derives the same
+ * x/y offsets centerCrop uses (centered, integer-floored) so both crops
+ * sample the same region.
+ *
+ * Nearest-neighbor copy of alpha only — R/G/B in the mask are unused.
+ */
+function cropMaskToMatch(
+  mask: ImageData,
+  srcW: number,
+  srcH: number,
+  croppedImage: ImageData,
+): ImageData {
+  if (mask.width !== srcW || mask.height !== srcH) {
+    // Mask wasn't at source dims — bail out, return as-is. Shouldn't
+    // happen on the Smart path, but defensive: applyMask will catch a
+    // dim mismatch with a typed error if we hand back a wrong mask.
+    return mask;
+  }
+  const cropW = croppedImage.width;
+  const cropH = croppedImage.height;
+  if (cropW === srcW && cropH === srcH) {
+    return mask;
+  }
+  const xOffset = Math.floor((srcW - cropW) / 2);
+  const yOffset = Math.floor((srcH - cropH) / 2);
+  const dst = new Uint8ClampedArray(cropW * cropH * 4);
+  for (let y = 0; y < cropH; y++) {
+    const srcRow = ((y + yOffset) * srcW + xOffset) * 4;
+    const dstRow = y * cropW * 4;
+    for (let x = 0; x < cropW; x++) {
+      dst[dstRow + x * 4 + 3] = mask.data[srcRow + x * 4 + 3]!;
+    }
+  }
+  return new ImageData(dst, cropW, cropH);
 }
 
 export function computeTargetDims(

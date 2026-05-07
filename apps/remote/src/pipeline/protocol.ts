@@ -64,6 +64,15 @@ export interface ProcessRequest {
    * source-cache keys its bilateral output on this value.
    */
   readonly smoothness?: "off" | "low" | "medium" | "high";
+  /**
+   * v4 silhouette quality. 'fast' (or undefined) keeps the v3 naive
+   * corner-sample. 'smart' enables U2-NetP-based ML segmentation; the
+   * worker lazy-loads the model on first 'smart' dispatch and falls back
+   * to 'fast' (with an `ml-error` outbound message) if loading or
+   * inference throws. Absence is treated as 'fast' so the R12 invariant
+   * (`silhouetteEnabled=false` default) never triggers a model load.
+   */
+  readonly silhouetteQuality?: "fast" | "smart";
 }
 
 export interface ProcessResult {
@@ -87,7 +96,54 @@ export interface WorkerErrorMessage {
   readonly message: string;
 }
 
-export type WorkerOutboundMessage = ProcessResult | WorkerErrorMessage;
+/**
+ * v4 ML status / error message shapes.
+ *
+ * Two stages enumerated up front:
+ *   - 'segmentation' (U5; U2-NetP)
+ *   - 'face-landmarks' (U6; MediaPipe Face Landmarker)
+ *
+ * U6 lands its emit sites without growing the protocol — only the
+ * dispatchers change. U8 wires these to the ModelLoadIndicator and
+ * DegradedModeNotice components.
+ *
+ * `ml-status` is informational (loading / ready / failed). `ml-error` is
+ * surfaced exactly once per session per stage when fallback to a
+ * non-ML path is taken; the main thread uses it to drive the degraded-
+ * mode UI banner.
+ */
+export type MLStage = "segmentation" | "face-landmarks";
+
+/**
+ * Mirror of `MLRuntimeErrorCode` from `ml/types.ts`. Duplicated here so
+ * `protocol.ts` doesn't import the ml/ tree (keeps the wire contract
+ * decoupled from the runtime). Must stay in sync — any new code added
+ * to `MLRuntimeErrorCode` is added here too.
+ */
+export type MLErrorCode =
+  | "model_fetch_failed"
+  | "model_load_failed"
+  | "inference_failed"
+  | "cors_blocked"
+  | "quota_exceeded";
+
+export interface MLStatusMessage {
+  readonly type: "ml-status";
+  readonly stage: MLStage;
+  readonly phase: "loading" | "ready" | "failed";
+}
+
+export interface MLErrorMessage {
+  readonly type: "ml-error";
+  readonly stage: MLStage;
+  readonly code: MLErrorCode;
+}
+
+export type WorkerOutboundMessage =
+  | ProcessResult
+  | WorkerErrorMessage
+  | MLStatusMessage
+  | MLErrorMessage;
 export type WorkerInboundMessage = ProcessRequest;
 
 // v3 extends to 8 stops — Asset filter needs 48, Environment needs 192.
@@ -116,4 +172,18 @@ export function isWorkerError(msg: unknown): msg is WorkerErrorMessage {
   if (typeof msg !== "object" || msg === null) return false;
   const m = msg as Record<string, unknown>;
   return m.type === "error" && typeof m.jobId === "number" && typeof m.code === "string";
+}
+
+export function isMLStatusMessage(msg: unknown): msg is MLStatusMessage {
+  if (typeof msg !== "object" || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return (
+    m.type === "ml-status" && typeof m.stage === "string" && typeof m.phase === "string"
+  );
+}
+
+export function isMLErrorMessage(msg: unknown): msg is MLErrorMessage {
+  if (typeof msg !== "object" || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m.type === "ml-error" && typeof m.stage === "string" && typeof m.code === "string";
 }
