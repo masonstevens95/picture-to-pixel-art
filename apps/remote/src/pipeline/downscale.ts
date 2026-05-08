@@ -17,10 +17,28 @@
  * partial alpha never reaches downscale.
  */
 
+export interface DownscaleOptions {
+  /**
+   * When provided, foreground pixels (alpha=255 in mask) are weighted higher
+   * than background pixels (alpha=0) in the area average. Mask must match
+   * input dimensions. v4.1 "subject readability" pass: thin foreground
+   * features (e.g. tripod legs at 128px output) survive area-averaging
+   * instead of being washed out by surrounding background pixels.
+   */
+  mask?: ImageData;
+  /**
+   * Multiplier applied to foreground pixels when `mask` is provided. Default
+   * 10 — empirically gives thin features high survival without distorting
+   * solid regions where most pixels are foreground anyway.
+   */
+  subjectWeight?: number;
+}
+
 export function areaAverageDownscale(
   input: ImageData,
   targetWidth: number,
   targetHeight: number,
+  options: DownscaleOptions = {},
 ): ImageData {
   if (targetWidth <= 0 || targetHeight <= 0) {
     throw new Error(`Target dims must be positive, got ${targetWidth}x${targetHeight}`);
@@ -28,6 +46,13 @@ export function areaAverageDownscale(
   if (input.width <= 0 || input.height <= 0) {
     throw new Error(`Source dims must be positive, got ${input.width}x${input.height}`);
   }
+  const mask = options.mask;
+  if (mask && (mask.width !== input.width || mask.height !== input.height)) {
+    throw new Error(
+      `Mask dims (${mask.width}x${mask.height}) must match input (${input.width}x${input.height})`,
+    );
+  }
+  const subjectWeight = options.subjectWeight ?? 10;
 
   // Don't upscale — return source as-is when target is at or above source.
   if (targetWidth >= input.width && targetHeight >= input.height) {
@@ -42,7 +67,9 @@ export function areaAverageDownscale(
 
   // For each destination pixel, average all source pixels covered by its
   // back-projected rectangle. Fractional coverage at the edges is handled by
-  // weighting partial pixels by the fractional area they contribute.
+  // weighting partial pixels by the fractional area they contribute. When a
+  // mask is provided, each pixel's weight is also multiplied by subjectWeight
+  // if it's a foreground pixel — biases the average toward subject preservation.
   const xRatio = srcW / targetWidth;
   const yRatio = srcH / targetHeight;
 
@@ -69,7 +96,15 @@ export function areaAverageDownscale(
         for (let sx = ix0; sx < ix1; sx++) {
           const xWeight = Math.min(sx + 1, sx1) - Math.max(sx, sx0);
           if (xWeight <= 0) continue;
-          const w = xWeight * yWeight;
+          let w = xWeight * yWeight;
+          if (mask) {
+            // Foreground if mask alpha is 255; background if 0. Multiplying
+            // by subjectWeight pulls the average toward foreground samples.
+            const maskAlpha = mask.data[(sy * srcW + sx) * 4 + 3]!;
+            if (maskAlpha > 127) {
+              w *= subjectWeight;
+            }
+          }
           const offset = (sy * srcW + sx) * 4;
           r += input.data[offset]! * w;
           g += input.data[offset + 1]! * w;

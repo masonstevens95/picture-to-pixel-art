@@ -19,6 +19,10 @@ import { applyOutline, DEFAULT_OUTLINE_COLOR } from "./outline";
 import { posterize } from "./posterize";
 import { quantizePalette } from "./quantize";
 import { saturationAdjust } from "./saturation";
+import { applySilhouetteOutline } from "./silhouetteOutline";
+import { closeMask, dilateMask } from "./silhouetteMorph";
+import { applyTightCrop } from "./tightCrop";
+import { applyFlatFill } from "./flatFill";
 import {
   applyMask,
   buildMask,
@@ -334,16 +338,50 @@ async function handleProcess(
     emitFirstRenderEnd(sourceId);
   }
 
+  // v4.2 cartoon shaping (subject-fattening): morph + tight crop. All
+  // identity-at-default; only fire when a silhouette mask exists for this
+  // dispatch. Order matters: close fills holes first, then dilate fattens,
+  // then tight crop re-frames around the fattened mask.
+  let workingImage: ImageData = cropped;
+  if (sourceMask) {
+    const closeR = msg.silhouetteCloseRadius ?? 0;
+    if (closeR > 0) {
+      sourceMask = closeMask(sourceMask, closeR);
+    }
+    const dilateR = msg.subjectDilateRadius ?? 0;
+    if (dilateR > 0) {
+      sourceMask = dilateMask(sourceMask, dilateR);
+    }
+    if (msg.tightCropEnabled === true) {
+      const tc = applyTightCrop(workingImage, sourceMask, {
+        enabled: true,
+        margin: msg.tightCropMargin ?? 0.05,
+        squarePad: msg.subjectAspectOutput !== true,
+      });
+      workingImage = tc.image;
+      sourceMask = tc.mask;
+    }
+  }
+
   // Step 3b: optional posterization (per-channel band reduction). Runs
   // before downscale so bands survive area-averaging. Identity when
   // bands=undefined (R12 invariant).
-  const posterized = posterize(cropped, msg.posterizeBands);
+  const posterized = posterize(workingImage, msg.posterizeBands);
 
   // Now compute target dimensions from the (possibly cropped) image.
   const { width, height } = computeTargetDims(posterized.width, posterized.height, targetLongEdge);
 
-  // Step 4: area-average downscale (pure JS, no canvas resize).
-  const downscaled = areaAverageDownscale(posterized, width, height);
+  // Step 4: area-average downscale (pure JS, no canvas resize). v4.1: when
+  // subject-aware downscale is enabled AND we have a silhouette mask,
+  // foreground pixels are weighted ~10× so thin features (tripod legs,
+  // weapon handles) survive low output resolutions instead of being
+  // washed out by surrounding background pixels.
+  const downscaled = areaAverageDownscale(
+    posterized,
+    width,
+    height,
+    msg.subjectAwareDownscale === true && sourceMask ? { mask: sourceMask } : {},
+  );
 
   // Step 4a: downscale the silhouette mask alongside the image (nearest-
   // neighbor preserves binary semantics).
@@ -376,8 +414,33 @@ async function handleProcess(
   // alpha=255 force is harmless because applyMask runs after.
   const masked = downscaledMask ? applyMask(outlined, downscaledMask) : outlined;
 
+  // Step 6a.5 (v4.2): cel-shade the foreground via k-means LAB clustering.
+  // Runs after applyMask so it operates on foreground pixels only (alpha>0
+  // ignored). Identity when flatFillEnabled !== true. Placed before the
+  // silhouette boundary outline so the stroke traces the flat-filled
+  // shape rather than the pre-cluster gradient.
+  const flatFilled = applyFlatFill(masked, {
+    enabled: msg.flatFillEnabled === true,
+    colors: msg.flatFillColors ?? 4,
+  });
+
+  // Step 6b: v4.1 silhouette boundary outline. Strokes a 1–2 px outline
+  // along the alpha 0/255 boundary AFTER mask applies, sealing the chunky
+  // silhouette into a single readable graphic asset. Distinct from XDoG
+  // outline above (luminance edges) — this strokes the alpha cutout
+  // specifically. Only fires when silhouette is enabled (no boundary to
+  // stroke without a mask) AND silhouetteOutlineEnabled is true.
+  const silhouetteOutlined =
+    downscaledMask && msg.silhouetteOutlineEnabled === true
+      ? applySilhouetteOutline(flatFilled, {
+          enabled: true,
+          width: msg.silhouetteOutlineWidth ?? 1,
+          color: msg.silhouetteOutlineColor ?? DEFAULT_OUTLINE_COLOR,
+        })
+      : flatFilled;
+
   // Step 7: chunky pixel render. chunkSize=1 short-circuits to identity.
-  const final = chunkify(masked, msg.chunkSize ?? 1);
+  const final = chunkify(silhouetteOutlined, msg.chunkSize ?? 1);
 
   const result: ProcessResult = {
     type: "result",

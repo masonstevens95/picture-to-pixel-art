@@ -66,6 +66,34 @@ export interface FilterPreset {
    * the user changes only this value.
    */
   silhouetteQuality: SilhouetteQuality;
+  /**
+   * v4.1 subject-aware downscale. When true AND silhouette is enabled,
+   * foreground pixels are weighted heavily during area-average downscale so
+   * thin features survive at low resolutions. Asset enables this by default;
+   * Custom and other filters keep it off.
+   */
+  subjectAwareDownscale: boolean;
+  /**
+   * v4.1 silhouette boundary outline. Strokes the alpha 0/255 boundary after
+   * the silhouette mask applies, sealing fragmented chunky output into a
+   * recognizable graphic asset. Asset enables this by default with thick
+   * black; Custom and other filters keep it off.
+   */
+  silhouetteOutlineEnabled: boolean;
+  silhouetteOutlineWidth: number;
+  silhouetteOutlineColor: RGB;
+  /**
+   * v4.2 cartoon shaping. All identity-at-default; Asset opts into the
+   * full set so source photos read as chunky cartoon assets at low output
+   * resolution. Each knob is independently togglable in the UI.
+   */
+  silhouetteCloseRadius: number;
+  subjectDilateRadius: number;
+  tightCropEnabled: boolean;
+  tightCropMargin: number;
+  subjectAspectOutput: boolean;
+  flatFillEnabled: boolean;
+  flatFillColors: number;
 }
 
 const BLACK: RGB = [0, 0, 0];
@@ -92,6 +120,20 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     smoothness: "off",
     faceAwareEnabled: false,
     silhouetteQuality: "fast",
+    // v4.1 subject-readability features default off; silhouette is off here
+    // anyway so they wouldn't fire even if enabled.
+    subjectAwareDownscale: false,
+    silhouetteOutlineEnabled: false,
+    silhouetteOutlineWidth: 1,
+    silhouetteOutlineColor: BLACK,
+    // v4.2 cartoon shaping defaults off — painterly preset preserves source.
+    silhouetteCloseRadius: 0,
+    subjectDilateRadius: 0,
+    tightCropEnabled: false,
+    tightCropMargin: 0.05,
+    subjectAspectOutput: false,
+    flatFillEnabled: false,
+    flatFillColors: 4,
   },
   portrait: {
     id: "portrait",
@@ -115,6 +157,17 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     smoothness: "medium",
     faceAwareEnabled: true,
     silhouetteQuality: "fast",
+    subjectAwareDownscale: false,
+    silhouetteOutlineEnabled: false,
+    silhouetteOutlineWidth: 1,
+    silhouetteOutlineColor: BLACK,
+    silhouetteCloseRadius: 0,
+    subjectDilateRadius: 0,
+    tightCropEnabled: false,
+    tightCropMargin: 0.05,
+    subjectAspectOutput: false,
+    flatFillEnabled: false,
+    flatFillColors: 4,
   },
   units: {
     id: "units",
@@ -136,6 +189,17 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     smoothness: "medium",
     faceAwareEnabled: false,
     silhouetteQuality: "fast",
+    subjectAwareDownscale: false,
+    silhouetteOutlineEnabled: false,
+    silhouetteOutlineWidth: 1,
+    silhouetteOutlineColor: BLACK,
+    silhouetteCloseRadius: 0,
+    subjectDilateRadius: 0,
+    tightCropEnabled: false,
+    tightCropMargin: 0.05,
+    subjectAspectOutput: false,
+    flatFillEnabled: false,
+    flatFillColors: 4,
   },
   asset: {
     id: "asset",
@@ -157,6 +221,26 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     smoothness: "low",
     faceAwareEnabled: false,
     silhouetteQuality: "smart",
+    // v4.1: Asset is the flagship "graphic cutout" filter. Both subject-
+    // readability features default ON: thin features (handles, legs) survive
+    // 48px output, and the boundary stroke seals the chunky silhouette into
+    // a recognizable shape.
+    subjectAwareDownscale: true,
+    silhouetteOutlineEnabled: true,
+    silhouetteOutlineWidth: 2,
+    silhouetteOutlineColor: BLACK,
+    // v4.2: Asset opts into the full cartoon-shaping stack. Source-pixel
+    // close fills U2-Net mask holes; dilate fattens thin features so they
+    // survive 48px output; tight crop with square pad re-frames the subject
+    // for game-asset cell layout; flat-fill cel-shades the foreground to
+    // 4 colors for the chunky cartoon look.
+    silhouetteCloseRadius: 1,
+    subjectDilateRadius: 2,
+    tightCropEnabled: true,
+    tightCropMargin: 0.05,
+    subjectAspectOutput: false,
+    flatFillEnabled: true,
+    flatFillColors: 4,
   },
   environment: {
     id: "environment",
@@ -178,6 +262,17 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     smoothness: "off",
     faceAwareEnabled: false,
     silhouetteQuality: "fast",
+    subjectAwareDownscale: false,
+    silhouetteOutlineEnabled: false,
+    silhouetteOutlineWidth: 1,
+    silhouetteOutlineColor: BLACK,
+    silhouetteCloseRadius: 0,
+    subjectDilateRadius: 0,
+    tightCropEnabled: false,
+    tightCropMargin: 0.05,
+    subjectAspectOutput: false,
+    flatFillEnabled: false,
+    flatFillColors: 4,
   },
 };
 
@@ -211,6 +306,17 @@ export function dialsMatchPreset(
     smoothness: SmoothnessLevel;
     faceAwareEnabled: boolean;
     silhouetteQuality: SilhouetteQuality;
+    subjectAwareDownscale: boolean;
+    silhouetteOutlineEnabled: boolean;
+    silhouetteOutlineWidth: number;
+    silhouetteOutlineColor: RGB;
+    silhouetteCloseRadius: number;
+    subjectDilateRadius: number;
+    tightCropEnabled: boolean;
+    tightCropMargin: number;
+    subjectAspectOutput: boolean;
+    flatFillEnabled: boolean;
+    flatFillColors: number;
   },
   preset: FilterPreset,
 ): boolean {
@@ -249,5 +355,26 @@ export function dialsMatchPreset(
   // user changing only Quality (Fast ↔ Smart) marks the style "modified",
   // even when silhouetteEnabled itself is false.
   if (dials.silhouetteQuality !== preset.silhouetteQuality) return false;
+  // v4.1 subject-readability fields. Width and color only matter when
+  // silhouetteOutlineEnabled, mirroring the outline pattern above.
+  if (dials.subjectAwareDownscale !== preset.subjectAwareDownscale) return false;
+  if (dials.silhouetteOutlineEnabled !== preset.silhouetteOutlineEnabled) return false;
+  if (dials.silhouetteOutlineEnabled) {
+    if (dials.silhouetteOutlineWidth !== preset.silhouetteOutlineWidth) return false;
+    if (!eqRgb(dials.silhouetteOutlineColor, preset.silhouetteOutlineColor)) return false;
+  }
+  // v4.2 cartoon shaping. Width/color subfields only checked when their
+  // gate is enabled, mirroring the outline pattern.
+  if (dials.silhouetteCloseRadius !== preset.silhouetteCloseRadius) return false;
+  if (dials.subjectDilateRadius !== preset.subjectDilateRadius) return false;
+  if (dials.tightCropEnabled !== preset.tightCropEnabled) return false;
+  if (dials.tightCropEnabled) {
+    if (Math.abs(dials.tightCropMargin - preset.tightCropMargin) > FLOAT_EPS) return false;
+    if (dials.subjectAspectOutput !== preset.subjectAspectOutput) return false;
+  }
+  if (dials.flatFillEnabled !== preset.flatFillEnabled) return false;
+  if (dials.flatFillEnabled) {
+    if (dials.flatFillColors !== preset.flatFillColors) return false;
+  }
   return true;
 }

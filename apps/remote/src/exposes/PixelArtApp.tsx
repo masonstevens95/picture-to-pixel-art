@@ -86,6 +86,22 @@ export default function PixelArtApp() {
   // false (no `.task` fetch, no `import('@mediapipe/tasks-vision')`).
   // U7 sets this to `true` for the Portrait filter.
   const [faceAwareEnabled, setFaceAwareEnabled] = useState<boolean>(false);
+  // v4.1 subject-readability features. Both default off; Asset filter
+  // enables both on apply. Only fire when silhouette is enabled.
+  const [subjectAwareDownscale, setSubjectAwareDownscale] = useState<boolean>(false);
+  const [silhouetteOutline, setSilhouetteOutline] = useState<{
+    enabled: boolean;
+    width: number;
+    color: readonly [number, number, number];
+  }>({ enabled: false, width: 1, color: [0, 0, 0] });
+  // v4.2 cartoon shaping. All default off / 0; preset filters opt in.
+  const [silhouetteCloseRadius, setSilhouetteCloseRadius] = useState<number>(0);
+  const [subjectDilateRadius, setSubjectDilateRadius] = useState<number>(0);
+  const [tightCropEnabled, setTightCropEnabled] = useState<boolean>(false);
+  const [tightCropMargin, setTightCropMargin] = useState<number>(0.05);
+  const [subjectAspectOutput, setSubjectAspectOutput] = useState<boolean>(false);
+  const [flatFillEnabled, setFlatFillEnabled] = useState<boolean>(false);
+  const [flatFillColors, setFlatFillColors] = useState<number>(4);
   // v3 Style state: which filter (if any) the dial state currently matches.
   // 'custom' alone means user is on Custom intentionally; 'custom' with
   // wasFilter set means they drifted from a previously-applied filter.
@@ -159,6 +175,17 @@ export default function PixelArtApp() {
           paletteSize,
           smoothness,
           faceAwareEnabled,
+          subjectAwareDownscale,
+          silhouetteOutlineEnabled: silhouetteOutline.enabled,
+          silhouetteOutlineWidth: silhouetteOutline.width,
+          silhouetteOutlineColor: silhouetteOutline.color,
+          silhouetteCloseRadius,
+          subjectDilateRadius,
+          tightCropEnabled,
+          tightCropMargin,
+          subjectAspectOutput,
+          flatFillEnabled,
+          flatFillColors,
         });
       } catch {
         // The pipeline hook surfaces worker errors; decode errors here are a
@@ -191,6 +218,15 @@ export default function PixelArtApp() {
     paletteSize,
     smoothness,
     faceAwareEnabled,
+    subjectAwareDownscale,
+    silhouetteOutline,
+    silhouetteCloseRadius,
+    subjectDilateRadius,
+    tightCropEnabled,
+    tightCropMargin,
+    subjectAspectOutput,
+    flatFillEnabled,
+    flatFillColors,
     process,
   ]);
 
@@ -245,6 +281,21 @@ export default function PixelArtApp() {
     setSmoothness(p.smoothness);
     setFaceAwareEnabled(p.faceAwareEnabled);
     setSilhouetteQuality(p.silhouetteQuality);
+    // v4.1 subject-readability dials.
+    setSubjectAwareDownscale(p.subjectAwareDownscale);
+    setSilhouetteOutline({
+      enabled: p.silhouetteOutlineEnabled,
+      width: p.silhouetteOutlineWidth,
+      color: p.silhouetteOutlineColor,
+    });
+    // v4.2 cartoon shaping dials.
+    setSilhouetteCloseRadius(p.silhouetteCloseRadius);
+    setSubjectDilateRadius(p.subjectDilateRadius);
+    setTightCropEnabled(p.tightCropEnabled);
+    setTightCropMargin(p.tightCropMargin);
+    setSubjectAspectOutput(p.subjectAspectOutput);
+    setFlatFillEnabled(p.flatFillEnabled);
+    setFlatFillColors(p.flatFillColors);
     setActiveStyle(id);
     setWasFilter(null);
   }, []);
@@ -287,6 +338,17 @@ export default function PixelArtApp() {
         smoothness,
         faceAwareEnabled,
         silhouetteQuality,
+        subjectAwareDownscale,
+        silhouetteOutlineEnabled: silhouetteOutline.enabled,
+        silhouetteOutlineWidth: silhouetteOutline.width,
+        silhouetteOutlineColor: silhouetteOutline.color,
+        silhouetteCloseRadius,
+        subjectDilateRadius,
+        tightCropEnabled,
+        tightCropMargin,
+        subjectAspectOutput,
+        flatFillEnabled,
+        flatFillColors,
       },
       preset,
     );
@@ -310,6 +372,15 @@ export default function PixelArtApp() {
     smoothness,
     faceAwareEnabled,
     silhouetteQuality,
+    subjectAwareDownscale,
+    silhouetteOutline,
+    silhouetteCloseRadius,
+    subjectDilateRadius,
+    tightCropEnabled,
+    tightCropMargin,
+    subjectAspectOutput,
+    flatFillEnabled,
+    flatFillColors,
   ]);
 
   const handleExport = useCallback(() => {
@@ -403,6 +474,26 @@ export default function PixelArtApp() {
           quality={silhouetteQuality}
           onQualityChange={setSilhouetteQuality}
           mlAvailable={state.mlStatus.segmentation !== "failed"}
+          subjectAwareDownscale={subjectAwareDownscale}
+          onSubjectAwareDownscaleChange={setSubjectAwareDownscale}
+          silhouetteOutlineEnabled={silhouetteOutline.enabled}
+          onSilhouetteOutlineEnabledChange={(enabled) =>
+            setSilhouetteOutline((prev) => ({ ...prev, enabled }))
+          }
+          silhouetteCloseRadius={silhouetteCloseRadius}
+          onSilhouetteCloseRadiusChange={setSilhouetteCloseRadius}
+          subjectDilateRadius={subjectDilateRadius}
+          onSubjectDilateRadiusChange={setSubjectDilateRadius}
+          tightCropEnabled={tightCropEnabled}
+          onTightCropEnabledChange={setTightCropEnabled}
+          tightCropMargin={tightCropMargin}
+          onTightCropMarginChange={setTightCropMargin}
+          subjectAspectOutput={subjectAspectOutput}
+          onSubjectAspectOutputChange={setSubjectAspectOutput}
+          flatFillEnabled={flatFillEnabled}
+          onFlatFillEnabledChange={setFlatFillEnabled}
+          flatFillColors={flatFillColors}
+          onFlatFillColorsChange={setFlatFillColors}
           disabled={!hasImage}
         />
         <ChunkyPixelsControl chunkSize={chunkSize} onChange={setChunkSize} disabled={!hasImage} />
