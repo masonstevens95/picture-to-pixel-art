@@ -386,8 +386,10 @@ export default function PixelArtApp() {
   const handleExport = useCallback(() => {
     if (!state.result) return;
     // Pass active style so the filename carries the asset-type label for
-    // game-asset folder sorting (R11 / AE6).
-    void downloadResultAsPng(state.result, activeStyle);
+    // game-asset folder sorting (R11 / AE6). Append the build SHA so
+    // downloads from different deploys are distinguishable when iterating
+    // on the pipeline.
+    void downloadResultAsPng(state.result, activeStyle, __BUILD_ID__);
   }, [state.result, activeStyle]);
 
   const hasImage = sourceFile !== null;
@@ -520,28 +522,40 @@ export default function PixelArtApp() {
         firstRenderActive={state.firstRenderActive}
       />
 
-      <div className="flex justify-end">
+      {/*
+        Stats + Download row. The stats panel lists every dial that
+        affects output, plus the build SHA, so a screenshot of this
+        region tells anyone (including the developer reviewing a bug
+        report) exactly what produced the rendered image. Filename of
+        the downloaded PNG also carries the build SHA suffix.
+      */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <pre className="overflow-x-auto rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-[11px] leading-snug text-neutral-400">
+{`build  ${__BUILD_ID__}
+style  ${activeStyle}  ·  res ${resolution}${state.result ? `  ·  out ${state.result.width}×${state.result.height}` : ""}
+sat ${saturation.toFixed(2)}  ·  smooth ${smoothness}  ·  face ${faceAwareEnabled ? "on" : "off"}
+palette ${paletteMode}${paletteMode === "curated" ? `:${curatedPaletteId}` : ""}/${paletteSize}  ·  post ${posterizeBands ?? "off"}  ·  chunk ${chunkSize}
+out ${outline.enabled ? `on(${outline.width}px)` : "off"}  ·  sil ${
+              silhouetteEnabled
+                ? `${silhouetteQuality}, tol=${silhouetteTolerance}`
+                : "off"
+            }${silhouetteEnabled ? `  ·  sub-aware ${subjectAwareDownscale ? "on" : "off"}  ·  sil-out ${silhouetteOutline.enabled ? `on(${silhouetteOutline.width}px)` : "off"}` : ""}
+shape  close ${silhouetteCloseRadius}  ·  dilate ${subjectDilateRadius}  ·  crop ${
+              tightCropEnabled
+                ? `${Math.round(tightCropMargin * 100)}%${subjectAspectOutput ? "/subj-asp" : "/sq-pad"}`
+                : "off"
+            }  ·  flat ${flatFillEnabled ? `${flatFillColors}c` : "off"}`}
+        </pre>
         <button
           type="button"
           onClick={handleExport}
           disabled={!canExport}
-          className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 shadow transition-colors hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 shadow transition-colors hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Download PNG
           {state.result && ` (${state.result.width}×${state.result.height})`}
         </button>
       </div>
-
-      {/*
-        Build identifier — short git SHA injected at build time via
-        vite.config.ts `define`. Lets users confirm which deploy they're
-        looking at when iterating; renders inline so it appears whether
-        the remote is mounted standalone (harness) or embedded in the
-        portfolio host.
-      */}
-      <p className="mt-2 text-center text-xs text-neutral-600">
-        build {__BUILD_ID__}
-      </p>
     </div>
   );
 }
