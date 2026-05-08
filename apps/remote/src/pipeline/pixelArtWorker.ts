@@ -20,7 +20,7 @@ import { posterize } from "./posterize";
 import { quantizePalette } from "./quantize";
 import { saturationAdjust } from "./saturation";
 import { applySilhouetteOutline } from "./silhouetteOutline";
-import { closeMask, dilateMask } from "./silhouetteMorph";
+import { closeMask, dilateSubject } from "./silhouetteMorph";
 import { applyTightCrop } from "./tightCrop";
 import { applyFlatFill } from "./flatFill";
 import {
@@ -350,7 +350,13 @@ async function handleProcess(
     }
     const dilateR = msg.subjectDilateRadius ?? 0;
     if (dilateR > 0) {
-      sourceMask = dilateMask(sourceMask, dilateR);
+      // Dilate spreads BOTH alpha (mask) and RGB (subject edge colors)
+      // outward. Without the RGB spread the halo would expose the photo's
+      // background pixels — a white halo around dark subjects on light
+      // photo backgrounds.
+      const r = dilateSubject(workingImage, sourceMask, dilateR);
+      workingImage = r.image;
+      sourceMask = r.mask;
     }
     if (msg.tightCropEnabled === true) {
       const tc = applyTightCrop(workingImage, sourceMask, {
