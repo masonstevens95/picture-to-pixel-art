@@ -22,9 +22,10 @@ ASSETS="$DIST/assets"
 # Sizing rationale (raw, not gzipped):
 #   v1   final exposed chunk:  8886 bytes (~3.0 KB gzipped)
 #   v2   final exposed chunk: 20810 bytes (~6.6 KB gzipped)
-#   v3   final exposed chunk: 31169 bytes (~8.7 KB gzipped)
-#   v4   final exposed chunk: 38149 bytes (~10.3 KB gzipped)
-#   v4.2 final exposed chunk: ~46000 bytes (~11.5 KB gzipped)
+#   v3    final exposed chunk: 31169 bytes (~8.7 KB gzipped)
+#   v4    final exposed chunk: 38149 bytes (~10.3 KB gzipped)
+#   v4.2  final exposed chunk: ~46000 bytes (~11.5 KB gzipped)
+#   v4.2b final exposed chunk: ~52000 bytes (~13.0 KB gzipped)
 #
 #   v3 → v4 delta raw: +6980 bytes. v4 plan budgeted up to 110 KB (3.2x
 #   v3) anticipating the ORT-Web JS adapter, MediaPipe Tasks shim, and
@@ -48,12 +49,20 @@ ASSETS="$DIST/assets"
 #   React internals / ORT / MediaPipe got bundled — growth is pure
 #   feature surface.
 #
-#   Ceiling set at v4.2-measured + ~4 KB headroom = 50000 bytes raw.
+#   v4.2 → v4.2b delta raw: ~+6000 bytes. Preset round-trip — embed
+#   every dial as a tEXt chunk in the downloaded PNG, parse on drop
+#   to restore dials. Adds the PresetDropZone component, PNG metadata
+#   read/write helpers (incl. CRC-32 table), preset shape definition,
+#   and the buildPreset/handlePresetLoad callbacks in PixelArtApp.
+#   Worker bundle is unaffected — none of this code runs in the
+#   pipeline.
+#
+#   Ceiling set at v4.2b-measured + ~4 KB headroom = 60000 bytes raw.
 #
 # Builds that exceed this fail loudly so the budget stays enforced, not
-# aspirational. If a future change pushes past 50 KB, that's the signal
+# aspirational. If a future change pushes past 60 KB, that's the signal
 # to revisit — likely a heavy import has accidentally become eager.
-MAX_EXPOSED_CHUNK_BYTES=50000
+MAX_EXPOSED_CHUNK_BYTES=60000
 
 fail() {
   echo "VERIFY FAIL: $*" >&2

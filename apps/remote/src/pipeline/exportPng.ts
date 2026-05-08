@@ -14,6 +14,9 @@
  * applyMask, so alpha=0 from silhouette is the final value reaching here.
  */
 
+import { embedTextChunk } from "./pngMetadata";
+import { PRESET_TEXT_CHUNK_KEYWORD, serializePreset, type Preset } from "./preset";
+
 export interface ExportableBuffer {
   width: number;
   height: number;
@@ -21,7 +24,10 @@ export interface ExportableBuffer {
   pixels: Uint8ClampedArray;
 }
 
-export async function bufferToPngBlob(buffer: ExportableBuffer): Promise<Blob> {
+export async function bufferToPngBlob(
+  buffer: ExportableBuffer,
+  preset?: Preset,
+): Promise<Blob> {
   if (buffer.width <= 0 || buffer.height <= 0) {
     throw new Error(`Invalid buffer dims ${buffer.width}x${buffer.height}`);
   }
@@ -43,7 +49,24 @@ export async function bufferToPngBlob(buffer: ExportableBuffer): Promise<Blob> {
   );
   ctx.putImageData(imageData, 0, 0);
 
-  return canvas.convertToBlob({ type: "image/png" });
+  const blob = await canvas.convertToBlob({ type: "image/png" });
+  if (!preset) return blob;
+
+  // Inject a tEXt chunk carrying the JSON-serialized preset so a
+  // future drop of this file can restore every dial. Done outside
+  // the canvas because convertToBlob doesn't expose chunk control.
+  const original = new Uint8Array(await blob.arrayBuffer());
+  const augmented = embedTextChunk(
+    original,
+    PRESET_TEXT_CHUNK_KEYWORD,
+    serializePreset(preset),
+  );
+  // Copy into a fresh ArrayBuffer so the Blob constructor's BlobPart
+  // type accepts it (TypeScript's lib.dom narrows BufferSource to
+  // ArrayBuffer-backed views, not SharedArrayBuffer-backed).
+  const buf = new ArrayBuffer(augmented.length);
+  new Uint8Array(buf).set(augmented);
+  return new Blob([buf], { type: "image/png" });
 }
 
 /**
@@ -88,7 +111,8 @@ export async function downloadResultAsPng(
   buffer: ExportableBuffer,
   style?: string,
   buildId?: string,
+  preset?: Preset,
 ): Promise<void> {
-  const blob = await bufferToPngBlob(buffer);
+  const blob = await bufferToPngBlob(buffer, preset);
   triggerDownload(blob, pngFilename(buffer.width, buffer.height, style, buildId));
 }
