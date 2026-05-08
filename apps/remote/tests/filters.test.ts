@@ -123,6 +123,17 @@ function presetDials(presetId: keyof typeof FILTERS) {
     smoothness: p.smoothness,
     faceAwareEnabled: p.faceAwareEnabled,
     silhouetteQuality: p.silhouetteQuality,
+    subjectAwareDownscale: p.subjectAwareDownscale,
+    silhouetteOutlineEnabled: p.silhouetteOutlineEnabled,
+    silhouetteOutlineWidth: p.silhouetteOutlineWidth,
+    silhouetteOutlineColor: p.silhouetteOutlineColor,
+    silhouetteCloseRadius: p.silhouetteCloseRadius,
+    subjectDilateRadius: p.subjectDilateRadius,
+    tightCropEnabled: p.tightCropEnabled,
+    tightCropMargin: p.tightCropMargin,
+    subjectAspectOutput: p.subjectAspectOutput,
+    flatFillEnabled: p.flatFillEnabled,
+    flatFillColors: p.flatFillColors,
   };
 }
 

@@ -122,6 +122,27 @@ export interface ProcessOptions {
    * fall back to identity (no boost applied).
    */
   faceAwareEnabled?: boolean;
+  /**
+   * v4.1 subject-aware downscale. When true AND silhouette is enabled,
+   * foreground pixels are weighted ~10× during area-average downscale so
+   * thin features survive at low output resolutions. Undefined / false =
+   * v4 unweighted area-average behavior.
+   */
+  subjectAwareDownscale?: boolean;
+  /** v4.1 silhouette boundary outline. Strokes the alpha 0/255 boundary
+   * after the mask applies. Only fires when silhouette is enabled. */
+  silhouetteOutlineEnabled?: boolean;
+  silhouetteOutlineWidth?: number;
+  silhouetteOutlineColor?: readonly [number, number, number];
+  /** v4.2 cartoon shaping (subject-fattening). All identity-at-default; only
+   * fire when a silhouette mask exists for the dispatch. */
+  silhouetteCloseRadius?: number;
+  subjectDilateRadius?: number;
+  tightCropEnabled?: boolean;
+  tightCropMargin?: number;
+  subjectAspectOutput?: boolean;
+  flatFillEnabled?: boolean;
+  flatFillColors?: number;
 }
 
 export interface UsePixelArtPipelineApi {
@@ -271,6 +292,17 @@ export function usePixelArtPipeline(
           smoothness: queued.options.smoothness,
           silhouetteQuality: queued.options.silhouetteQuality,
           faceAwareEnabled: queued.options.faceAwareEnabled,
+          subjectAwareDownscale: queued.options.subjectAwareDownscale,
+          silhouetteOutlineEnabled: queued.options.silhouetteOutlineEnabled,
+          silhouetteOutlineWidth: queued.options.silhouetteOutlineWidth,
+          silhouetteOutlineColor: queued.options.silhouetteOutlineColor,
+          silhouetteCloseRadius: queued.options.silhouetteCloseRadius,
+          subjectDilateRadius: queued.options.subjectDilateRadius,
+          tightCropEnabled: queued.options.tightCropEnabled,
+          tightCropMargin: queued.options.tightCropMargin,
+          subjectAspectOutput: queued.options.subjectAspectOutput,
+          flatFillEnabled: queued.options.flatFillEnabled,
+          flatFillColors: queued.options.flatFillColors,
         };
 
         setState((prev) => ({ ...prev, status: "processing", error: null }));

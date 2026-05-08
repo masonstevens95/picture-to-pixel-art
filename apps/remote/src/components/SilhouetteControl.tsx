@@ -42,6 +42,27 @@ export interface SilhouetteControlProps {
    * dispatch time independently of this UI hint.
    */
   mlAvailable?: boolean;
+  /** v4.1 subject-aware downscale toggle. */
+  subjectAwareDownscale?: boolean;
+  onSubjectAwareDownscaleChange?: (enabled: boolean) => void;
+  /** v4.1 silhouette boundary outline toggle. */
+  silhouetteOutlineEnabled?: boolean;
+  onSilhouetteOutlineEnabledChange?: (enabled: boolean) => void;
+  /** v4.2 cartoon shaping group. Each knob is independently togglable. */
+  silhouetteCloseRadius?: number;
+  onSilhouetteCloseRadiusChange?: (radius: number) => void;
+  subjectDilateRadius?: number;
+  onSubjectDilateRadiusChange?: (radius: number) => void;
+  tightCropEnabled?: boolean;
+  onTightCropEnabledChange?: (enabled: boolean) => void;
+  tightCropMargin?: number;
+  onTightCropMarginChange?: (margin: number) => void;
+  subjectAspectOutput?: boolean;
+  onSubjectAspectOutputChange?: (enabled: boolean) => void;
+  flatFillEnabled?: boolean;
+  onFlatFillEnabledChange?: (enabled: boolean) => void;
+  flatFillColors?: number;
+  onFlatFillColorsChange?: (colors: number) => void;
   disabled?: boolean;
 }
 
@@ -56,6 +77,24 @@ export function SilhouetteControl({
   quality = "smart",
   onQualityChange,
   mlAvailable = true,
+  subjectAwareDownscale = false,
+  onSubjectAwareDownscaleChange,
+  silhouetteOutlineEnabled = false,
+  onSilhouetteOutlineEnabledChange,
+  silhouetteCloseRadius = 0,
+  onSilhouetteCloseRadiusChange,
+  subjectDilateRadius = 0,
+  onSubjectDilateRadiusChange,
+  tightCropEnabled = false,
+  onTightCropEnabledChange,
+  tightCropMargin = 0.05,
+  onTightCropMarginChange,
+  subjectAspectOutput = false,
+  onSubjectAspectOutputChange,
+  flatFillEnabled = false,
+  onFlatFillEnabledChange,
+  flatFillColors = 4,
+  onFlatFillColorsChange,
   disabled = false,
 }: SilhouetteControlProps) {
   const handleEnabledChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -145,6 +184,159 @@ export function SilhouetteControl({
         />
         <span className="w-8 text-right tabular-nums text-neutral-300">{tolerance}</span>
       </label>
+      {onSubjectAwareDownscaleChange && (
+        <label className="flex items-center gap-2 pl-1 text-xs text-neutral-300">
+          <input
+            type="checkbox"
+            checked={subjectAwareDownscale}
+            onChange={(e) => onSubjectAwareDownscaleChange(e.target.checked)}
+            disabled={disabled || !enabled}
+            className="accent-emerald-400"
+          />
+          <span>Preserve subject detail</span>
+        </label>
+      )}
+      {onSilhouetteOutlineEnabledChange && (
+        <label className="flex items-center gap-2 pl-1 text-xs text-neutral-300">
+          <input
+            type="checkbox"
+            checked={silhouetteOutlineEnabled}
+            onChange={(e) => onSilhouetteOutlineEnabledChange(e.target.checked)}
+            disabled={disabled || !enabled}
+            className="accent-emerald-400"
+          />
+          <span>Outline subject boundary</span>
+        </label>
+      )}
+      {(onSilhouetteCloseRadiusChange ||
+        onSubjectDilateRadiusChange ||
+        onTightCropEnabledChange ||
+        onFlatFillEnabledChange) && (
+        <fieldset
+          className="mt-1 space-y-2 border-t border-neutral-800 pt-2 pl-1"
+          disabled={disabled || !enabled}
+        >
+          <legend className="text-xs font-medium text-neutral-300">Cartoon shaping</legend>
+          {onSilhouetteCloseRadiusChange && (
+            <label className="flex items-center gap-2 text-xs text-neutral-400">
+              <span className="w-24">Mask close</span>
+              <input
+                type="range"
+                min={0}
+                max={5}
+                step={1}
+                value={silhouetteCloseRadius}
+                onChange={(e) => onSilhouetteCloseRadiusChange(Number(e.target.value))}
+                disabled={disabled || !enabled}
+                aria-label="Silhouette mask close radius"
+                className="flex-1 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <span className="w-6 text-right tabular-nums text-neutral-300">
+                {silhouetteCloseRadius}
+              </span>
+            </label>
+          )}
+          {onSubjectDilateRadiusChange && (
+            <label className="flex items-center gap-2 text-xs text-neutral-400">
+              <span className="w-24">Fatten subject</span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                step={1}
+                value={subjectDilateRadius}
+                onChange={(e) => onSubjectDilateRadiusChange(Number(e.target.value))}
+                disabled={disabled || !enabled}
+                aria-label="Subject dilation radius"
+                className="flex-1 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <span className="w-6 text-right tabular-nums text-neutral-300">
+                {subjectDilateRadius}
+              </span>
+            </label>
+          )}
+          {onTightCropEnabledChange && (
+            <>
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input
+                  type="checkbox"
+                  checked={tightCropEnabled}
+                  onChange={(e) => onTightCropEnabledChange(e.target.checked)}
+                  disabled={disabled || !enabled}
+                  className="accent-emerald-400"
+                />
+                <span>Tight crop to subject</span>
+              </label>
+              {onTightCropMarginChange && (
+                <label className="flex items-center gap-2 pl-5 text-xs text-neutral-400">
+                  <span className="w-20">Margin</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={30}
+                    step={1}
+                    value={Math.round(tightCropMargin * 100)}
+                    onChange={(e) =>
+                      onTightCropMarginChange(Number(e.target.value) / 100)
+                    }
+                    disabled={disabled || !enabled || !tightCropEnabled}
+                    aria-label="Tight crop margin"
+                    className="flex-1 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                  <span className="w-8 text-right tabular-nums text-neutral-300">
+                    {Math.round(tightCropMargin * 100)}%
+                  </span>
+                </label>
+              )}
+              {onSubjectAspectOutputChange && (
+                <label className="flex items-center gap-2 pl-5 text-xs text-neutral-300">
+                  <input
+                    type="checkbox"
+                    checked={subjectAspectOutput}
+                    onChange={(e) => onSubjectAspectOutputChange(e.target.checked)}
+                    disabled={disabled || !enabled || !tightCropEnabled}
+                    className="accent-emerald-400"
+                  />
+                  <span>Subject-aspect output (no square pad)</span>
+                </label>
+              )}
+            </>
+          )}
+          {onFlatFillEnabledChange && (
+            <>
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input
+                  type="checkbox"
+                  checked={flatFillEnabled}
+                  onChange={(e) => onFlatFillEnabledChange(e.target.checked)}
+                  disabled={disabled || !enabled}
+                  className="accent-emerald-400"
+                />
+                <span>Flat-fill foreground</span>
+              </label>
+              {onFlatFillColorsChange && (
+                <label className="flex items-center gap-2 pl-5 text-xs text-neutral-400">
+                  <span className="w-20">Colors</span>
+                  <input
+                    type="range"
+                    min={2}
+                    max={8}
+                    step={1}
+                    value={flatFillColors}
+                    onChange={(e) => onFlatFillColorsChange(Number(e.target.value))}
+                    disabled={disabled || !enabled || !flatFillEnabled}
+                    aria-label="Flat-fill cluster count"
+                    className="flex-1 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                  <span className="w-6 text-right tabular-nums text-neutral-300">
+                    {flatFillColors}
+                  </span>
+                </label>
+              )}
+            </>
+          )}
+        </fieldset>
+      )}
     </fieldset>
   );
 }

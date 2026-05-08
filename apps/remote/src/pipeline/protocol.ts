@@ -82,6 +82,48 @@ export interface ProcessRequest {
    * filter and v3-byte-identical configurations leave this unset.
    */
   readonly faceAwareEnabled?: boolean;
+  /**
+   * v4.1 subject-aware downscale. When `true` AND a silhouette mask exists
+   * for this dispatch, foreground pixels are weighted ~10× during
+   * area-average downscale so thin features (tripod legs, weapon handles)
+   * survive at low output resolutions. Only fires when silhouette is
+   * enabled — without a mask there's nothing to weight by. Absence falls
+   * back to v4 unweighted area-average.
+   */
+  readonly subjectAwareDownscale?: boolean;
+  /**
+   * v4.1 silhouette boundary outline. When enabled, strokes a 1–2 px outline
+   * along every alpha 0/255 transition AFTER the silhouette mask applies.
+   * Distinct from `outlineEnabled` (XDoG luminance edges); this one strokes
+   * the alpha-cutout boundary specifically and gives game-asset workflow
+   * the chunky outlined-cutout look. Absence treated as disabled.
+   */
+  readonly silhouetteOutlineEnabled?: boolean;
+  readonly silhouetteOutlineWidth?: number;
+  readonly silhouetteOutlineColor?: readonly [number, number, number];
+  /**
+   * v4.2 cartoon shaping (subject-fattening) knobs. All optional, all
+   * identity at undefined / 0 / false so they're additive on top of v4.1.
+   * Run only when a silhouette mask exists for the dispatch.
+   */
+  /** Source-pixel radius for mask close (dilate→erode). 0 = off. */
+  readonly silhouetteCloseRadius?: number;
+  /** Source-pixel radius for pure subject dilation. 0 = off. */
+  readonly subjectDilateRadius?: number;
+  /** Tight-crop the image+mask to the foreground bbox before downscale. */
+  readonly tightCropEnabled?: boolean;
+  /** Margin (0..1 fraction of bbox max-dim) added on each side. */
+  readonly tightCropMargin?: number;
+  /**
+   * When tight crop is on AND this is true, output uses the bbox aspect
+   * (no extra padding). When false (default), the crop is padded to a
+   * square with transparent fill so the output retains a square frame.
+   */
+  readonly subjectAspectOutput?: boolean;
+  /** Cel-shade the foreground via k-means LAB clustering. */
+  readonly flatFillEnabled?: boolean;
+  /** Number of flat colors when flatFillEnabled. 2..16. */
+  readonly flatFillColors?: number;
 }
 
 export interface ProcessResult {
