@@ -230,12 +230,14 @@ export const FILTERS: Readonly<Record<FilterId, FilterPreset>> = {
     silhouetteOutlineWidth: 2,
     silhouetteOutlineColor: BLACK,
     // v4.2: Asset opts into the full cartoon-shaping stack. Source-pixel
-    // close fills U2-Net mask holes; dilate fattens thin features so they
-    // survive 48px output; tight crop with square pad re-frames the subject
-    // for game-asset cell layout; flat-fill cel-shades the foreground to
-    // 4 colors for the chunky cartoon look.
-    silhouetteCloseRadius: 1,
-    subjectDilateRadius: 2,
+    // close fills U2-Net mask holes; dilate aggressively fattens thin
+    // features so they read as chunky cartoon shapes at 48px output;
+    // tight crop with square pad re-frames the subject for game-asset
+    // cell layout; flat-fill cel-shades the foreground to 4 colors.
+    // Dilate radius bumped 2→8 so a mortar tripod / weapon handle survives
+    // as a recognizable thick stroke instead of a one-pixel line.
+    silhouetteCloseRadius: 3,
+    subjectDilateRadius: 8,
     tightCropEnabled: true,
     tightCropMargin: 0.05,
     subjectAspectOutput: false,

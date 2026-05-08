@@ -223,7 +223,7 @@ export function SilhouetteControl({
               <input
                 type="range"
                 min={0}
-                max={5}
+                max={15}
                 step={1}
                 value={silhouetteCloseRadius}
                 onChange={(e) => onSilhouetteCloseRadiusChange(Number(e.target.value))}
@@ -231,7 +231,7 @@ export function SilhouetteControl({
                 aria-label="Silhouette mask close radius"
                 className="flex-1 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
               />
-              <span className="w-6 text-right tabular-nums text-neutral-300">
+              <span className="w-8 text-right tabular-nums text-neutral-300">
                 {silhouetteCloseRadius}
               </span>
             </label>
@@ -242,7 +242,7 @@ export function SilhouetteControl({
               <input
                 type="range"
                 min={0}
-                max={10}
+                max={30}
                 step={1}
                 value={subjectDilateRadius}
                 onChange={(e) => onSubjectDilateRadiusChange(Number(e.target.value))}
@@ -250,7 +250,7 @@ export function SilhouetteControl({
                 aria-label="Subject dilation radius"
                 className="flex-1 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
               />
-              <span className="w-6 text-right tabular-nums text-neutral-300">
+              <span className="w-8 text-right tabular-nums text-neutral-300">
                 {subjectDilateRadius}
               </span>
             </label>
