@@ -22,6 +22,12 @@ export default defineConfig({
       "@pixelart/remote/exposes": resolve(here, "apps/remote/src/exposes"),
     },
   },
+  // Mirror the `define` injected by apps/remote/vite.config.ts so jsdom
+  // tests mounting PixelArtApp see a real string for the build-id global
+  // instead of throwing ReferenceError.
+  define: {
+    __BUILD_ID__: JSON.stringify("test"),
+  },
   test: {
     environment: "jsdom",
     globals: true,

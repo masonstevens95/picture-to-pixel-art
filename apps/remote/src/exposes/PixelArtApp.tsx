@@ -531,6 +531,17 @@ export default function PixelArtApp() {
           {state.result && ` (${state.result.width}×${state.result.height})`}
         </button>
       </div>
+
+      {/*
+        Build identifier — short git SHA injected at build time via
+        vite.config.ts `define`. Lets users confirm which deploy they're
+        looking at when iterating; renders inline so it appears whether
+        the remote is mounted standalone (harness) or embedded in the
+        portfolio host.
+      */}
+      <p className="mt-2 text-center text-xs text-neutral-600">
+        build {__BUILD_ID__}
+      </p>
     </div>
   );
 }
