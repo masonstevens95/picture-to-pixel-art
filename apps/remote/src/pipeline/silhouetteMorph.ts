@@ -11,14 +11,18 @@
  *
  *   - dilateSubject(image, mask, radius) → WATERSHED dilation that
  *     fattens both the alpha mask and the subject's RGB outward, but
- *     stops at gap centerlines so adjacent thin features (e.g. tripod
- *     legs) don't merge into a single mass. The subject grows by R
- *     source pixels everywhere it has bg space; in narrow channels
- *     between fg regions the growth halts at the medial axis, leaving
- *     a 1-px bg ridge. Implementation: Chebyshev distance transform
- *     from fg, then for each bg pixel within R: if it's a strict local
- *     max on the distance map (= medial axis ridge), keep bg; else
- *     mark fg with RGB copied from the nearest fg seed.
+ *     stops where two distant fg seeds meet so adjacent thin features
+ *     (e.g. tripod legs) don't merge into a single mass. The subject
+ *     grows by R source pixels into open bg; in narrow channels
+ *     between fg regions the growth halts at the watershed boundary,
+ *     leaving a ~1-px bg ridge. Implementation: Chebyshev distance
+ *     transform with nearest-fg-seed propagation. For each bg pixel
+ *     within R distance: if any 8-neighbor's seed is FAR from this
+ *     pixel's seed on the source plane (Chebyshev > SEED_GAP_THRESHOLD),
+ *     keep bg; otherwise mark fg with RGB copied from the nearest fg
+ *     seed. The seed-distance criterion (vs naive local-max-on-
+ *     distance-map) avoids spurious holes inside fg concavities, where
+ *     neighboring seeds vary smoothly along the SAME fg arc.
  *
  *   - erodeMask(radius) → pure erosion (alpha-only). Treats outside the
  *     image as background, so edge pixels erode. Used internally by
@@ -47,6 +51,22 @@ export interface DilateSubjectResult {
  * shrink the mask.
  */
 const BOUNDARY_CLEANUP = 2;
+
+/**
+ * Seed-distance threshold for watershed detection. Two adjacent bg
+ * pixels with nearest-fg seeds farther apart than this threshold
+ * (Chebyshev) are deemed to be on opposite sides of a watershed —
+ * preserving the gap between distinct fg features. Seeds closer than
+ * the threshold are treated as smooth variations along a single fg
+ * arc (concavity), and the bg between them gets dilated normally.
+ *
+ * 4 source pixels: large enough to ignore U2-Net mask jitter
+ * (1-2 px noise along the boundary) but small enough that genuine
+ * gaps between thin features (tripod legs, weapon handles) trigger
+ * the watershed.
+ */
+const SEED_GAP_THRESHOLD = 4;
+const SEED_GAP_THRESHOLD_SQ = SEED_GAP_THRESHOLD * SEED_GAP_THRESHOLD;
 
 interface DistanceTransform {
   /** Chebyshev distance from each pixel to the nearest fg pixel. 0 for fg. */
@@ -174,21 +194,34 @@ export function dilateSubject(
       if (d === 0) continue; // already fg
       if (d > totalRadius) continue; // beyond growth limit
 
-      // Watershed: this bg pixel is on a medial-axis ridge between two
-      // fg regions if NO 8-neighbor has a strictly greater distance.
-      // Flat ridges (neighbors at equal distance) also qualify — both
-      // sides preserve the gap.
-      let isRidge = true;
-      for (let dy = -1; dy <= 1 && isRidge; dy++) {
-        for (let dx = -1; dx <= 1 && isRidge; dx++) {
+      // Watershed: this bg pixel is on a watershed line if any
+      // 8-neighbor's nearest-fg seed is FAR from this pixel's seed on
+      // the source plane. Far seeds = opposite sides of a real gap
+      // between fg features (tripod legs). Near seeds = smooth
+      // variation along a single fg arc (concavity inside the subject)
+      // — those should fill normally.
+      const mySeed = nearest[idx]!;
+      const mySeedX = mySeed % w;
+      const mySeedY = (mySeed - mySeedX) / w;
+      let isWatershed = false;
+      for (let dy = -1; dy <= 1 && !isWatershed; dy++) {
+        for (let dx = -1; dx <= 1 && !isWatershed; dx++) {
           if (dx === 0 && dy === 0) continue;
           const nx = x + dx;
           const ny = y + dy;
           if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-          if (dist[ny * w + nx]! > d) isRidge = false;
+          const nbrSeed = nearest[ny * w + nx]!;
+          if (nbrSeed === mySeed) continue;
+          const nbrSeedX = nbrSeed % w;
+          const nbrSeedY = (nbrSeed - nbrSeedX) / w;
+          const ddx = mySeedX - nbrSeedX;
+          const ddy = mySeedY - nbrSeedY;
+          if (ddx * ddx + ddy * ddy > SEED_GAP_THRESHOLD_SQ) {
+            isWatershed = true;
+          }
         }
       }
-      if (isRidge) continue;
+      if (isWatershed) continue;
 
       // Mark fg in mask, copy RGB from the nearest fg seed.
       outMaskData[idx * 4 + 3] = 255;
