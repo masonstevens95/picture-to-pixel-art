@@ -1,30 +1,100 @@
 /**
  * Source-resolution alpha-mask morphology (v4.2).
  *
- * Two ops, both 4-neighbor binary morphology applied to the alpha channel
- * of a silhouette mask at SOURCE resolution (before downscale):
+ * Three ops applied at SOURCE resolution, before downscale:
  *
- *   - close(radius)  → dilate then erode. Fills small holes inside the
- *     subject and fuses fragmented foreground regions; net size is
- *     approximately preserved. Useful when the U2-NetP mask has tiny
- *     holes the area-average downscale would otherwise leak through.
+ *   - closeMask(radius)  → dilate then erode (alpha-only). Fills small
+ *     holes inside the subject and fuses fragmented foreground regions;
+ *     net size is approximately preserved. Useful when the U2-NetP mask
+ *     has tiny holes that area-average downscale would otherwise leak
+ *     through.
  *
- *   - dilate(radius) → pure dilation. Fattens thin features (mortar
- *     barrel, tripod legs, weapon handles) so they survive aggressive
- *     downscale and read as solid shapes in the cartoon output.
+ *   - dilateSubject(image, mask, radius) → pure dilation that fattens
+ *     thin features so they survive aggressive downscale. Operates on
+ *     BOTH alpha (extending the mask outward) AND RGB (extending the
+ *     subject's edge colors outward through the new halo). Without the
+ *     RGB spread, the dilated halo would show the photo's background
+ *     pixels through the now-foreground alpha — e.g. a white halo
+ *     around an olive-drab mortar on a white photo background. Each
+ *     newly-fg pixel takes its RGB from the first 4-neighbor that was
+ *     already foreground in the prior pass; iterating R passes spreads
+ *     subject colors R pixels outward.
  *
- * Radius is denominated in source pixels. Both ops short-circuit to
- * identity (return input by reference) when radius ≤ 0, preserving the
- * v4.1 invariant: default-off contributes nothing to output.
+ *   - erodeMask(radius) → pure erosion (alpha-only). Treats outside the
+ *     image as background, so edge pixels erode. Used internally by
+ *     closeMask; not currently exposed on the worker dispatch path.
  *
- * Image-edge handling: dilation can't extend beyond the image bounds,
- * and erosion treats outside-the-image as background. For close, this
- * means foreground pixels touching the image edge get eaten by the
- * erode pass — an acceptable cost; tight-crop runs after morphology
- * and re-frames the subject anyway.
+ * Radius is denominated in source pixels. All ops short-circuit to
+ * identity when radius ≤ 0, preserving the v4.1 invariant.
  */
 
-export function dilateMask(mask: ImageData, radius: number): ImageData {
+export interface DilateSubjectResult {
+  image: ImageData;
+  mask: ImageData;
+}
+
+/**
+ * Fattens both the alpha mask and the subject's RGB outward.
+ *
+ * For each newly-foreground pixel, copies RGB from the first
+ * 4-neighbor that was foreground in the prior pass. Iterating R
+ * passes propagates subject edge colors R pixels into the halo.
+ */
+export function dilateSubject(
+  image: ImageData,
+  mask: ImageData,
+  radius: number,
+): DilateSubjectResult {
+  if (radius <= 0) return { image, mask };
+  if (image.width !== mask.width || image.height !== mask.height) {
+    throw new Error(
+      `dilateSubject dim mismatch: image ${image.width}x${image.height}, mask ${mask.width}x${mask.height}`,
+    );
+  }
+  const w = mask.width;
+  const h = mask.height;
+  let curMask = new Uint8ClampedArray(mask.data);
+  let curImg = new Uint8ClampedArray(image.data);
+  for (let pass = 0; pass < radius; pass++) {
+    const nextMask = new Uint8ClampedArray(curMask);
+    const nextImg = new Uint8ClampedArray(curImg);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const aIdx = (y * w + x) * 4 + 3;
+        if (curMask[aIdx] === 255) continue;
+        // Find first 4-neighbor that's currently foreground; copy its
+        // RGB into the new pixel and mark it foreground in the new mask.
+        let nbrA = -1;
+        if (x > 0 && curMask[aIdx - 4] === 255) nbrA = aIdx - 4;
+        else if (x < w - 1 && curMask[aIdx + 4] === 255) nbrA = aIdx + 4;
+        else if (y > 0 && curMask[aIdx - w * 4] === 255) nbrA = aIdx - w * 4;
+        else if (y < h - 1 && curMask[aIdx + w * 4] === 255) nbrA = aIdx + w * 4;
+        if (nbrA >= 0) {
+          nextMask[aIdx] = 255;
+          // RGB lives at indices [aIdx-3, aIdx-2, aIdx-1] for the same pixel.
+          const rgbDst = aIdx - 3;
+          const rgbSrc = nbrA - 3;
+          nextImg[rgbDst] = curImg[rgbSrc]!;
+          nextImg[rgbDst + 1] = curImg[rgbSrc + 1]!;
+          nextImg[rgbDst + 2] = curImg[rgbSrc + 2]!;
+        }
+      }
+    }
+    curMask = nextMask;
+    curImg = nextImg;
+  }
+  return {
+    image: new ImageData(curImg, w, h),
+    mask: new ImageData(curMask, w, h),
+  };
+}
+
+/**
+ * Pure alpha-mask dilation (no RGB spread). Used internally by closeMask
+ * since the mask gets eroded back to ~original size, hiding any halo
+ * pixels — RGB spread would be wasted work.
+ */
+function dilateMaskOnly(mask: ImageData, radius: number): ImageData {
   if (radius <= 0) return mask;
   const w = mask.width;
   const h = mask.height;
@@ -79,5 +149,5 @@ export function erodeMask(mask: ImageData, radius: number): ImageData {
 
 export function closeMask(mask: ImageData, radius: number): ImageData {
   if (radius <= 0) return mask;
-  return erodeMask(dilateMask(mask, radius), radius);
+  return erodeMask(dilateMaskOnly(mask, radius), radius);
 }
