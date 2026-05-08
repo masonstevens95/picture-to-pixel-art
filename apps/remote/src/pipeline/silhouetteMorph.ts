@@ -39,7 +39,25 @@ export interface DilateSubjectResult {
  * For each newly-foreground pixel, copies RGB from the first
  * 4-neighbor that was foreground in the prior pass. Iterating R
  * passes propagates subject edge colors R pixels into the halo.
+ *
+ * Boundary-leak guard: U2-Net masks routinely classify ~1-3 source
+ * pixels of background as foreground along the subject edge, because
+ * the binary cutoff lands on anti-aliased transition pixels. If we
+ * spread RGB starting from those pixels, we propagate bg colors
+ * outward (white halo around an olive subject on a white bg).
+ *
+ * Mitigation: pre-erode the mask by `BOUNDARY_CLEANUP` source pixels
+ * to peel off the leaky boundary, then dilate by `radius +
+ * BOUNDARY_CLEANUP` so the net outward growth still equals `radius`.
+ * The spread sources are now firmly inside the subject. Cleanup is
+ * clamped to `radius` so a dilate=1 doesn't accidentally shrink the
+ * mask. Subjects thinner than 2*BOUNDARY_CLEANUP source pixels (e.g.
+ * a 3-px tripod leg with cleanup=2) lose mass to the erode pass —
+ * acceptable since those features wouldn't survive aggressive
+ * fattening anyway, and the surviving fragments still get spread.
  */
+const BOUNDARY_CLEANUP = 2;
+
 export function dilateSubject(
   image: ImageData,
   mask: ImageData,
@@ -53,9 +71,12 @@ export function dilateSubject(
   }
   const w = mask.width;
   const h = mask.height;
-  let curMask = new Uint8ClampedArray(mask.data);
+  const cleanupR = Math.min(BOUNDARY_CLEANUP, radius);
+  const inputMask = cleanupR > 0 ? erodeMask(mask, cleanupR) : mask;
+  const totalRadius = radius + cleanupR;
+  let curMask = new Uint8ClampedArray(inputMask.data);
   let curImg = new Uint8ClampedArray(image.data);
-  for (let pass = 0; pass < radius; pass++) {
+  for (let pass = 0; pass < totalRadius; pass++) {
     const nextMask = new Uint8ClampedArray(curMask);
     const nextImg = new Uint8ClampedArray(curImg);
     for (let y = 0; y < h; y++) {
