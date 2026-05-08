@@ -17,13 +17,14 @@ set -euo pipefail
 REMOTE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$REMOTE_ROOT/dist"
 ASSETS="$DIST/assets"
-# Hard ceiling per v3 plan + scope-guardian doc-review, updated for v4.
+# Hard ceiling per v3 plan + scope-guardian doc-review, updated for v4.2.
 #
 # Sizing rationale (raw, not gzipped):
-#   v1 final exposed chunk:  8886 bytes (~3 KB gzipped)
-#   v2 final exposed chunk: 20810 bytes (~6.6 KB gzipped)
-#   v3 final exposed chunk: 31169 bytes (~8.67 KB gzipped)
-#   v4 final exposed chunk: 38149 bytes (~10.25 KB gzipped)
+#   v1   final exposed chunk:  8886 bytes (~3.0 KB gzipped)
+#   v2   final exposed chunk: 20810 bytes (~6.6 KB gzipped)
+#   v3   final exposed chunk: 31169 bytes (~8.7 KB gzipped)
+#   v4   final exposed chunk: 38149 bytes (~10.3 KB gzipped)
+#   v4.2 final exposed chunk: ~46000 bytes (~11.5 KB gzipped)
 #
 #   v3 → v4 delta raw: +6980 bytes. v4 plan budgeted up to 110 KB (3.2x
 #   v3) anticipating the ORT-Web JS adapter, MediaPipe Tasks shim, and
@@ -37,18 +38,22 @@ ASSETS="$DIST/assets"
 #     dist/assets/vision_bundle-*.js      ~138 KB  MediaPipe Tasks shim (lazy)
 #     dist/assets/ort-wasm-simd-threaded-*.wasm ~12.5 MB  ORT WASM binary (lazy)
 #
-#   Growth in the exposed chunk itself is from 5 new components
-#   (SmoothnessControl, FaceBoostToggle, ModelLoadIndicator,
-#   FirstRenderSpinner, DegradedModeNotice), extended FilterPreset, and
-#   ml-status / first-render protocol message types. The ML adapters
-#   themselves are NOT in the exposed chunk.
+#   v4 → v4.2 delta raw: ~+7900 bytes. The cartoon-shaping pass added
+#   seven dials (silhouette mask close, subject dilation, tight crop +
+#   margin + subject-aspect, flat-fill enable + colors), each landing
+#   per-filter preset fields, dialsMatchPreset checks, hook plumbing,
+#   and ~120 lines of UI inside SilhouetteControl. Pipeline-side
+#   modules (silhouetteMorph, tightCrop, flatFill) go into the WORKER
+#   bundle, not the exposed chunk. The grep guards below confirm no
+#   React internals / ORT / MediaPipe got bundled — growth is pure
+#   feature surface.
 #
-#   Ceiling set at v4-measured + ~3 KB headroom = 41000 bytes raw.
+#   Ceiling set at v4.2-measured + ~4 KB headroom = 50000 bytes raw.
 #
 # Builds that exceed this fail loudly so the budget stays enforced, not
-# aspirational. If a future change pushes past 41 KB, that's the signal
+# aspirational. If a future change pushes past 50 KB, that's the signal
 # to revisit — likely a heavy import has accidentally become eager.
-MAX_EXPOSED_CHUNK_BYTES=41000
+MAX_EXPOSED_CHUNK_BYTES=50000
 
 fail() {
   echo "VERIFY FAIL: $*" >&2
