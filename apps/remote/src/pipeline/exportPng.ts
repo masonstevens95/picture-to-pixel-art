@@ -51,12 +51,20 @@ export async function bufferToPngBlob(buffer: ExportableBuffer): Promise<Blob> {
  * the active style is included so users batching outputs into a folder
  * can sort/group them: `pixel-art-environment-192x144.png`. Custom and
  * undefined produce the v2 naming `pixel-art-WxH.png`.
+ *
+ * `buildId` (v4.2) appends the deploy's short git SHA so when iterating
+ * on the pipeline we can match a specific download to the build that
+ * produced it: `pixel-art-asset-128x128-a43a780.png`.
  */
-export function pngFilename(width: number, height: number, style?: string): string {
-  if (style && style !== "custom") {
-    return `pixel-art-${style}-${width}x${height}.png`;
-  }
-  return `pixel-art-${width}x${height}.png`;
+export function pngFilename(
+  width: number,
+  height: number,
+  style?: string,
+  buildId?: string,
+): string {
+  const stylePart = style && style !== "custom" ? `-${style}` : "";
+  const buildPart = buildId ? `-${buildId}` : "";
+  return `pixel-art${stylePart}-${width}x${height}${buildPart}.png`;
 }
 
 /**
@@ -79,7 +87,8 @@ export function triggerDownload(blob: Blob, filename: string): void {
 export async function downloadResultAsPng(
   buffer: ExportableBuffer,
   style?: string,
+  buildId?: string,
 ): Promise<void> {
   const blob = await bufferToPngBlob(buffer);
-  triggerDownload(blob, pngFilename(buffer.width, buffer.height, style));
+  triggerDownload(blob, pngFilename(buffer.width, buffer.height, style, buildId));
 }
