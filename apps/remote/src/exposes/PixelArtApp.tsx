@@ -5,6 +5,7 @@ import AspectRatioSelect, { type AspectRatioValue } from "../components/AspectRa
 import BrandColorsTextarea from "../components/BrandColorsTextarea";
 import DegradedModeNotice from "../components/DegradedModeNotice";
 import DropZone from "../components/DropZone";
+import PresetDropZone from "../components/PresetDropZone";
 import ModelLoadIndicator from "../components/ModelLoadIndicator";
 import OutlineControl, { type OutlineControlValue } from "../components/OutlineControl";
 import PaletteModeControl, { type PaletteMode } from "../components/PaletteModeControl";
@@ -25,7 +26,9 @@ import { usePixelArtPipeline } from "../hooks/usePixelArtPipeline";
 import type { SmoothnessLevel } from "../pipeline/bilateral";
 import { downloadResultAsPng } from "../pipeline/exportPng";
 import { CURATED_PALETTES, type CuratedPaletteId, type RGB } from "../pipeline/palettes";
+import { PRESET_VERSION, type Preset } from "../pipeline/preset";
 import type { ValidLongEdge } from "../pipeline/protocol";
+import { isValidLongEdge } from "../pipeline/protocol";
 
 /**
  * Default-exported entry point for the pixel-art microfrontend.
@@ -383,14 +386,132 @@ export default function PixelArtApp() {
     flatFillColors,
   ]);
 
+  // Snapshot every dial that affects output, in a shape that survives a
+  // round-trip through PNG tEXt-chunk metadata. Used by handleExport to
+  // embed the preset and by PresetDropZone in reverse to restore it.
+  const buildPreset = useCallback((): Preset => ({
+    version: PRESET_VERSION,
+    buildId: __BUILD_ID__,
+    style: activeStyle,
+    resolution,
+    saturation,
+    aspectRatio: aspectRatio ?? null,
+    paletteMode,
+    curatedPaletteId,
+    customPaletteText,
+    paletteSize,
+    brandColorsText,
+    outline: {
+      enabled: outline.enabled,
+      width: outline.width,
+      color: [outline.color[0], outline.color[1], outline.color[2]],
+    },
+    posterizeBands: posterizeBands ?? null,
+    silhouette: {
+      enabled: silhouetteEnabled,
+      tolerance: silhouetteTolerance,
+      quality: silhouetteQuality,
+    },
+    chunkSize,
+    smoothness,
+    faceAwareEnabled,
+    subjectAwareDownscale,
+    silhouetteOutline: {
+      enabled: silhouetteOutline.enabled,
+      width: silhouetteOutline.width,
+      color: [
+        silhouetteOutline.color[0],
+        silhouetteOutline.color[1],
+        silhouetteOutline.color[2],
+      ],
+    },
+    silhouetteCloseRadius,
+    subjectDilateRadius,
+    tightCrop: {
+      enabled: tightCropEnabled,
+      margin: tightCropMargin,
+      subjectAspectOutput,
+    },
+    flatFill: { enabled: flatFillEnabled, colors: flatFillColors },
+  }), [
+    activeStyle,
+    resolution,
+    saturation,
+    aspectRatio,
+    paletteMode,
+    curatedPaletteId,
+    customPaletteText,
+    paletteSize,
+    brandColorsText,
+    outline,
+    posterizeBands,
+    silhouetteEnabled,
+    silhouetteTolerance,
+    silhouetteQuality,
+    chunkSize,
+    smoothness,
+    faceAwareEnabled,
+    subjectAwareDownscale,
+    silhouetteOutline,
+    silhouetteCloseRadius,
+    subjectDilateRadius,
+    tightCropEnabled,
+    tightCropMargin,
+    subjectAspectOutput,
+    flatFillEnabled,
+    flatFillColors,
+  ]);
+
   const handleExport = useCallback(() => {
     if (!state.result) return;
-    // Pass active style so the filename carries the asset-type label for
-    // game-asset folder sorting (R11 / AE6). Append the build SHA so
-    // downloads from different deploys are distinguishable when iterating
-    // on the pipeline.
-    void downloadResultAsPng(state.result, activeStyle, __BUILD_ID__);
-  }, [state.result, activeStyle]);
+    // Filename carries style + build SHA for traceability; the embedded
+    // preset is the authoritative dial-state record (round-trippable via
+    // PresetDropZone).
+    void downloadResultAsPng(state.result, activeStyle, __BUILD_ID__, buildPreset());
+  }, [state.result, activeStyle, buildPreset]);
+
+  const handlePresetLoad = useCallback((p: Preset) => {
+    // Apply every dial in one event-handler tick; React 18 batches these.
+    if (isValidLongEdge(p.resolution)) setResolution(p.resolution);
+    setSaturation(p.saturation);
+    setAspectRatio(p.aspectRatio ?? undefined);
+    setPaletteMode(p.paletteMode);
+    setCuratedPaletteId(p.curatedPaletteId as CuratedPaletteId);
+    setCustomPaletteText(p.customPaletteText);
+    setPaletteSize(p.paletteSize);
+    setBrandColorsText(p.brandColorsText);
+    setOutline({
+      enabled: p.outline.enabled,
+      width: p.outline.width,
+      color: p.outline.color,
+    });
+    setPosterizeBands(p.posterizeBands ?? undefined);
+    setSilhouetteEnabled(p.silhouette.enabled);
+    setSilhouetteTolerance(p.silhouette.tolerance);
+    setSilhouetteQuality(p.silhouette.quality);
+    setChunkSize(p.chunkSize);
+    setSmoothness(p.smoothness);
+    setFaceAwareEnabled(p.faceAwareEnabled);
+    setSubjectAwareDownscale(p.subjectAwareDownscale);
+    setSilhouetteOutline({
+      enabled: p.silhouetteOutline.enabled,
+      width: p.silhouetteOutline.width,
+      color: p.silhouetteOutline.color,
+    });
+    setSilhouetteCloseRadius(p.silhouetteCloseRadius);
+    setSubjectDilateRadius(p.subjectDilateRadius);
+    setTightCropEnabled(p.tightCrop.enabled);
+    setTightCropMargin(p.tightCrop.margin);
+    setSubjectAspectOutput(p.tightCrop.subjectAspectOutput);
+    setFlatFillEnabled(p.flatFill.enabled);
+    setFlatFillColors(p.flatFill.colors);
+    // Style: preset's style flips the StyleSelector to that filter id (or
+    // 'custom' when the preset was made from custom dials). The
+    // dialsMatchPreset effect will redirect to 'custom' on the next render
+    // if any dial drifts from the named filter, which is correct behavior.
+    setActiveStyle(p.style as typeof activeStyle);
+    setWasFilter(null);
+  }, []);
 
   const hasImage = sourceFile !== null;
   const canExport = state.status === "ready" && state.result !== null;
@@ -406,6 +527,8 @@ export default function PixelArtApp() {
       />
 
       <DropZone onChange={handleFile} disabled={false} />
+
+      <PresetDropZone onLoad={handlePresetLoad} />
 
       {/* Style selector is the highest-leverage v3 control. Above the resolution
          slider; enabled regardless of image-load state so users can pre-arm a
